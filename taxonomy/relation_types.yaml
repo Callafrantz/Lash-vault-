@@ -1,0 +1,148 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Relation predicate vocabulary — CLOSED SET
+#
+# Open-vocabulary relation extraction produces graphs that look impressive and
+# cannot be queried, because `influences`, `impacts`, `affects` and
+# `has_effect_on` become four edges meaning one thing.
+#
+# `subject_types` / `object_types` form the type-compatibility matrix: a small
+# piece of configuration that eliminates most nonsense edges at zero runtime cost.
+# ═══════════════════════════════════════════════════════════════════════════
+
+version: "1.0.0"
+
+groups:
+
+  causal:
+    predicates:
+      causes:
+        inverse: caused_by
+        description: A produces B
+        qualifiers: [strength, polarity, temporality, conditions]
+        subject_types: [card, environmental_factor, technique, product, condition, phenomenon]
+        object_types:  [card, phenomenon, condition, metric, symptom]
+        acyclic: true
+      affects:
+        inverse: affected_by
+        description: A modulates B without determining it
+        qualifiers: [strength, polarity, curve, conditions]
+        subject_types: [card, environmental_factor, technique, product, lash_trait, client_segment]
+        object_types:  [card, phenomenon, metric, condition]
+        acyclic: true
+      prevents:
+        inverse: prevented_by
+        qualifiers: [strength, conditions]
+        subject_types: [card, technique, protocol, product]
+        object_types:  [condition, phenomenon, symptom]
+      mitigates:
+        qualifiers: [strength]
+        subject_types: [card, technique, protocol, product]
+        object_types:  [condition, phenomenon, symptom]
+      exacerbates:
+        qualifiers: [strength]
+      correlates_with:
+        symmetric: true
+        description: Association without established mechanism — deliberately weaker than `causes`
+        qualifiers: [strength, direction]
+      trade_off_with:
+        symmetric: true
+        description: Improving A degrades B
+        qualifiers: [curve]
+      threshold_for:
+        description: A crosses a boundary that triggers B
+        qualifiers: [value, unit, operator]
+
+  diagnostic:
+    predicates:
+      indicates:
+        description: Symptom → likely root cause
+        qualifiers: [likelihood, specificity]
+        subject_types: [symptom, phenomenon]
+        object_types:  [card, condition, phenomenon]
+      differentiates_from:
+        symmetric: true
+        description: Distinguishes two confusable conditions
+        qualifiers: [discriminating_feature]
+      diagnosed_by:
+        subject_types: [condition, phenomenon]
+        object_types:  [technique, protocol, tool]
+      presents_as:
+        description: Cause → observable signature
+        subject_types: [condition, phenomenon]
+        object_types:  [symptom]
+
+  procedural:
+    predicates:
+      requires:      { description: Hard dependency }
+      prerequisite_of:
+        description: Learning-order dependency — builds the curriculum DAG
+        acyclic: true
+      precedes:      { description: Temporal ordering within a procedure, acyclic: true }
+      part_of:       { inverse: has_part, acyclic: true }
+      performed_with: { subject_types: [technique], object_types: [tool, product] }
+      produces:      { subject_types: [technique, protocol], object_types: [phenomenon, card] }
+
+  taxonomic:
+    predicates:
+      subclass_of:  { acyclic: true }
+      instance_of:  {}
+      alias_of:     { symmetric: true }
+      defined_by:   {}
+      measured_by:  { object_types: [tool, metric, technique] }
+      quantified_by: { object_types: [metric] }
+
+  applicability:
+    predicates:
+      applies_to:
+        description: Knowledge → context (eye shape, skin type, climate, region)
+        object_types: [eye_shape, lash_trait, client_segment, region, environmental_factor]
+      contraindicated_with:
+        symmetric: true
+        risk_relevant: true
+      suitable_for:   { qualifiers: [strength] }
+      unsuitable_for: { qualifiers: [strength] }
+      optimal_range_for:
+        qualifiers: [min, max, unit]
+        subject_types: [card, parameter]
+      compatible_with:   { symmetric: true }
+      incompatible_with: { symmetric: true, risk_relevant: true }
+
+  epistemic:
+    predicates:
+      supports:     {}
+      contradicts:  { symmetric: true }
+      refines:      { description: More precise successor }
+      supersedes:   { description: Replaces outdated knowledge, acyclic: true }
+      debunks:      { object_types: [myth] }
+      derived_from: { description: Provenance edge to source material }
+
+  commercial:
+    predicates:
+      alternative_to:  { symmetric: true }
+      substitutes_for: {}
+      manufactured_by: { subject_types: [product], object_types: [brand, organization] }
+      distributed_by:  { subject_types: [product], object_types: [organization] }
+      priced_at:       { qualifiers: [value, currency] }
+      used_in_service: {}
+      drives_metric:   { object_types: [metric], qualifiers: [strength, polarity] }
+
+# ── Graph hygiene rules applied after every S7 batch ──────────────────────
+hygiene:
+  cycle_detection:
+    predicates: [causes, prevents, subclass_of, prerequisite_of, precedes, supersedes, part_of]
+    action: flag_for_review
+    note: >
+      Cycles in causal predicates are usually extraction errors. Legitimate feedback loops
+      must be explicitly whitelisted rather than silently permitted.
+  transitive_pruning:
+    predicates: [causes, affects]
+    rule: "Given A→B→C and A→C, keep A→C only if independently evidenced."
+  contradictory_pairs:
+    action: create_contradiction
+    pairs:
+      - [causes, prevents]
+      - [suitable_for, unsuitable_for]
+      - [compatible_with, incompatible_with]
+  hub_alert_degree: 500
+  orphan_alert: true
+  model_inferred_confidence_cap: 0.75

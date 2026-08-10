@@ -1,0 +1,189 @@
+---
+id: {{ card.id }}
+type: knowledge-card
+title: {{ card.title }}
+{%- if card.aliases %}
+aliases: [{{ card.aliases | join(', ') }}]
+{%- endif %}
+version: {{ card.version }}
+schema_version: {{ card.schema_version }}
+
+domain: {{ card.domain }}
+domain_name: {{ card.domain_name }}
+subcategory: {{ card.primary_path[1] }}
+{%- if card.secondary_domains %}
+secondary_domains: [{{ card.secondary_domains | join(', ') }}]
+{%- endif %}
+
+knowledge_type: {{ card.facets.knowledge_type }}
+epistemic_status: {{ card.facets.epistemic_status }}
+risk_tier: {{ card.facets.risk_tier }}
+skill_level: {{ card.facets.skill_level }}
+audience: [{{ card.facets.audience | join(', ') }}]
+service_lifecycle: [{{ card.facets.service_lifecycle | join(', ') }}]
+context_sensitivity: [{{ card.facets.context_sensitivity | join(', ') }}]
+actionability: {{ card.facets.actionability }}
+
+confidence: {{ card.confidence.score }}
+confidence_band: {{ card.confidence.band }}
+claim_count: {{ card.evidence.claim_count }}
+supporting_claims: {{ card.evidence.supporting_claims }}
+contradicting_claims: {{ card.evidence.contradicting_claims }}
+independent_groups: {{ card.evidence.independent_source_groups }}
+distinct_creators: {{ card.evidence.distinct_creators }}
+highest_evidence_tier: {{ card.evidence.highest_evidence_tier }}
+
+has_parameters: {{ card.parameters | length > 0 }}
+has_contradictions: {{ card.contradictions | length > 0 }}
+lashos_usable: {{ card.lashos.usable }}
+{%- if card.lashos.ai_features %}
+ai_features: [{{ card.lashos.ai_features | map(attribute='feature') | join(', ') }}]
+{%- endif %}
+
+status: {{ card.status }}
+created: {{ card.created_at | date }}
+updated: {{ card.updated_at | date }}
+last_evidence: {{ card.last_evidence_at }}
+tags: [{{ card.render_tags | join(', ') }}]
+---
+
+> [!abstract] Definition
+> {{ card.definition }}
+
+**Confidence** {{ card.confidence.score }} ({{ card.confidence.band }})
+· **Evidence** {{ card.evidence.claim_count }} claims / {{ card.evidence.independent_source_groups }} independent groups
+· **Status** {{ card.facets.epistemic_status | replace('_', ' ') }}
+· **Risk** tier {{ card.facets.risk_tier }}
+{%- if card.facets.risk_tier >= 3 %}
+
+> [!danger] Medical-adjacent knowledge
+> This card is risk tier {{ card.facets.risk_tier }}. It must not be used for diagnosis.
+> Reviewed by {{ card.review.reviewed_by }} on {{ card.review.reviewed_at | date }}.
+{%- endif %}
+
+## Summary
+{{ card.summary }}
+
+{% if card.mechanism %}## Why It Works
+{{ card.mechanism }}
+{% endif %}
+
+{% if card.parameters %}## Parameters
+| Parameter | Value | Unit | Applies to | Conditions | Conf |
+|---|---|---|---|---|---|
+{%- for p in card.parameters %}
+| {{ p.name | humanize }} | {{ p | render_value }} | {{ p.unit or '—' }} | {{ p.applies_to | entity_link or '—' }} | {{ p.condition or '—' }} | {{ p.confidence }} |
+{%- endfor %}
+{%- for p in card.parameters if p.variance_note %}
+
+> [!note] {{ p.name | humanize }}: {{ p.variance_note }}
+{%- endfor %}
+{% endif %}
+
+{% if card.practical_application %}## Practical Application
+{{ card.practical_application }}
+{% endif %}
+
+{% if card.implementation_steps %}## Implementation
+{%- for s in card.implementation_steps %}
+{{ s.step }}. **{{ s.action }}**{% if s.detail %} {{ s.detail }}{% endif %} ^step{{ s.step }}
+{%- endfor %}
+{% endif %}
+
+{% if card.preconditions %}**Requires:** {{ card.preconditions | join(' · ') }}
+{% endif %}
+
+{% if card.common_mistakes %}## Common Mistakes
+{%- for m in card.common_mistakes %}
+
+> [!warning] {{ m.mistake }}
+{%- if m.why_it_happens %}
+> **Why it happens:** {{ m.why_it_happens }}
+{%- endif %}
+{%- if m.consequence %}
+> **Consequence:** {{ m.consequence }}
+{%- endif %}
+{%- if m.correction %}
+> **Correction:** {{ m.correction }}
+{%- endif %}
+{%- endfor %}
+{% endif %}
+
+{% if card.exceptions or card.edge_cases %}## Exceptions & Edge Cases
+{%- for e in card.exceptions %}
+- **{{ e.condition }}** — {{ e.behaviour }}
+{%- endfor %}
+{%- for e in card.edge_cases %}
+- {{ e }}
+{%- endfor %}
+{% endif %}
+
+{% if card.counter_indications %}## Do Not Apply When
+{%- for c in card.counter_indications %}
+> [!danger] {{ c.situation }}
+> {{ c.reason }}
+{%- endfor %}
+{% endif %}
+
+{% if card.contradictions %}## Contradicting Viewpoints
+{%- for c in card.contradictions %}
+
+> [!question] {{ c.statement }}
+> **Status** {{ c.resolution_status | replace('_', ' ') }}
+{%- if c.resolution_note %}
+> **Note** {{ c.resolution_note }}
+{%- endif %}
+> See [[{{ c.id | contradiction_link }}]]
+{%- endfor %}
+{% endif %}
+
+## Evidence
+| Tier | Count |
+|---|---|
+{%- for e in card.evidence.evidence_ledger %}
+| {{ e.tier | humanize }} | {{ e.count }} |
+{%- endfor %}
+
+{% if card.key_quotes %}### Key Quotes
+{%- for q in card.key_quotes %}
+
+> {{ q.quote }}
+> — [[{{ q.source_note }}|{{ q.creator_name }}]], {{ q.attribution }}
+{%- endfor %}
+{% endif %}
+
+{% if card.graph_mermaid %}## Knowledge Graph
+```mermaid
+{{ card.graph_mermaid }}
+```
+{% endif %}
+{%- for group, rels in card.relations_by_group.items() %}
+**{{ group | humanize }}:** {{ rels | map(attribute='link') | join(' · ') }}
+{%- endfor %}
+
+{% if card.lashos.usable %}## LashOS Applications
+> [!tip] Product integration
+{%- for f in card.lashos.ai_features %}
+> - **{{ f.feature | humanize }}** — {{ f.use }}
+{%- endfor %}
+{%- for m in card.lashos.course_modules %}
+> - **Course module** — *{{ m.module }}* ({{ m.level }}, {{ m.role | replace('_',' ') }})
+{%- endfor %}
+{%- for r in card.lashos.retention_intelligence %}
+> - **Retention model** — {{ r }}
+{%- endfor %}
+{% endif %}
+
+## Sources
+| Creator | Platform | Date | Timestamp | Stance | Reliability |
+|---|---|---|---|---|---|
+{%- for s in card.sources %}
+| [[{{ s.creator_name }}]] | {{ s.platform }} | {{ s.published_at }} | [{{ s.timestamp_label }}]({{ s.deep_link }}) | {{ s.stance }} | {{ s.reliability_score }} |
+{%- endfor %}
+
+<!-- LKE:HUMAN-OVERRIDE:START -->
+{{ card.human_override_md or '' }}
+<!-- LKE:HUMAN-OVERRIDE:END -->
+
+---
+*Generated by LashOS Knowledge Engine · card v{{ card.version }} · {{ card.updated_at | date }} · knowledge version {{ knowledge_version }}*

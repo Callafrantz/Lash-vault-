@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lashos.io/schemas/contradiction.schema.json",
+  "title": "Contradiction",
+  "description": "A first-class record of professional disagreement. Contradictions are NEVER resolved by merging or averaging — both positions are preserved with weights, and ai_handling determines how downstream features express the disagreement.",
+  "type": "object",
+  "required": ["id","conflict_type","position_a","position_b","resolution_status","ai_handling"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^ctr_[0-9a-f]{12}$" },
+    "concept_id": { "type": ["string","null"] },
+    "card_id": { "type": ["string","null"] },
+    "conflict_type": {
+      "type": "string",
+      "enum": ["factual","definitional","contextual","terminological","product_specific","temporal","values"],
+      "description": "Most apparent factual conflicts in this corpus are actually contextual, product_specific or temporal. Classify before escalating."
+    },
+
+    "position_a": { "$ref": "#/$defs/position" },
+    "position_b": { "$ref": "#/$defs/position" },
+
+    "resolution_status": {
+      "type": "string",
+      "enum": ["unresolved","context_dependent","resolved","superseded","not_a_conflict"]
+    },
+    "resolution_hypothesis": { "type": ["string","null"] },
+    "resolution_note": { "type": ["string","null"] },
+    "resolution_evidence_needed": { "type": ["string","null"] },
+    "conditioning_variable": {
+      "type": ["string","null"],
+      "description": "When resolution_status is context_dependent: the variable that determines which position applies."
+    },
+
+    "ai_handling": {
+      "type": "string",
+      "enum": ["present_both","present_majority_with_caveat","context_dependent",
+               "refer_to_expert","suppress_debunked"],
+      "description": "Enforced at answer synthesis. Not overridable by the API caller."
+    },
+    "risk_tier": { "type": "integer", "minimum": 0, "maximum": 4, "default": 0 },
+    "affected_cards": { "type": "array", "items": { "type": "string" }, "default": [] },
+
+    "detected_at": { "type": "string", "format": "date-time" },
+    "resolved_at": { "type": ["string","null"], "format": "date-time" },
+    "resolved_by": { "type": ["string","null"] },
+    "review_task_id": { "type": ["string","null"] }
+  },
+
+  "$defs": {
+    "position": {
+      "type": "object",
+      "required": ["proposition","claims","weight"],
+      "properties": {
+        "proposition": { "type": "string" },
+        "claims": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "creators": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "independent_groups": {
+          "type": "integer", "minimum": 0,
+          "description": "Weight is damped by sqrt of this — 20 sources are stronger than 4, but not 5x stronger."
+        },
+        "highest_evidence_tier": { "type": ["string","null"] },
+        "weight": { "type": "number", "minimum": 0, "maximum": 1 },
+        "date_range": {
+          "type": "array", "items": { "type": "string", "format": "date" },
+          "minItems": 2, "maxItems": 2
+        }
+      }
+    }
+  },
+
+  "allOf": [
+    {
+      "if": { "properties": { "risk_tier": { "minimum": 3 } } },
+      "then": { "properties": { "ai_handling": { "const": "refer_to_expert" } },
+                "description": "Medical-adjacent disagreements are never adjudicated by the AI." }
+    },
+    {
+      "if": { "properties": { "resolution_status": { "const": "context_dependent" } } },
+      "then": { "required": ["conditioning_variable"] }
+    }
+  ]
+}

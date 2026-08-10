@@ -1,0 +1,108 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Orthogonal classification facets
+#
+# The domain tree says what a card is ABOUT.
+# These eight axes say what KIND of knowledge it is — and they are what make
+# the corpus filterable for AI features rather than merely browsable.
+# Every card carries a value on every axis.
+# ═══════════════════════════════════════════════════════════════════════════
+
+version: "1.0.0"
+
+facets:
+
+  knowledge_type:
+    required: true
+    cardinality: one
+    description: The shape of the knowledge.
+    values:
+      definition:        Establishes what something is
+      principle:         A general rule that governs behaviour
+      mechanism:         Explains why something happens
+      technique:         A physical skill or method
+      protocol:          An ordered, repeatable procedure
+      heuristic:         A rule of thumb with known limits
+      parameter:         A measurable value, range or threshold
+      diagnostic:        Maps observations to causes
+      contraindication:  Defines when NOT to act
+      metric:            A quantity to be tracked
+      framework:         A structured way of thinking about a problem
+      script:            Reusable language for a situation
+      case_study:        A specific documented instance
+      opinion:           A stated position without evidentiary claim
+      myth:              A false belief, retained in order to correct it
+
+  epistemic_status:
+    required: true
+    cardinality: one
+    description: How we know it.
+    values:
+      established_science: Peer-reviewed literature or physical/chemical law
+      manufacturer_spec:   Producer technical documentation
+      industry_consensus:  Broad agreement across independent expert sources
+      contested:           Credible experts actively disagree
+      emerging:            New, limited evidence, insufficient corroboration
+      anecdotal:           Individual experience, not systematically verified
+      folklore:            Widely repeated, no traceable evidentiary origin
+      debunked:            Contradicted by stronger evidence; retained to correct
+
+  risk_tier:
+    required: true
+    cardinality: one
+    description: Consequence if this knowledge is wrong. OVERRIDES confidence in all gating.
+    values:
+      0:
+        name: informational
+        rules: { human_review: false, citation: false, disclaimer: false }
+      1:
+        name: operational
+        rules: { human_review: false, citation: false, disclaimer: false }
+      2:
+        name: client_safety
+        rules: { human_review: sampled, citation: true, disclaimer: false,
+                 min_confidence_to_assert: 0.70, no_unqualified_imperatives: true }
+      3:
+        name: medical_adjacent
+        rules: { human_review: true, citation: true, disclaimer: true,
+                 referral_language_required: true, diagnostic_phrasing_forbidden: true }
+      4:
+        name: regulatory
+        rules: { human_review: true, citation: true, disclaimer: true,
+                 jurisdiction_scoped: true, verify_locally: true }
+
+  skill_level:
+    required: true
+    cardinality: one
+    values: [foundation, intermediate, advanced, specialist, educator, business_owner]
+
+  audience:
+    required: true
+    cardinality: many
+    values: [student, artist, educator, salon_owner, client_facing, supplier]
+
+  service_lifecycle:
+    required: true
+    cardinality: many
+    description: Where in the client journey this applies.
+    values: [marketing, enquiry, consultation, assessment, design, application,
+             aftercare, fill, removal, retention_followup, back_office]
+
+  context_sensitivity:
+    required: true
+    cardinality: many
+    description: >
+      What makes this true or false. Drives the context-conflict detection that lets the
+      assistant say "this assumes 45-55% RH; your studio reports 68%" instead of
+      confidently giving wrong guidance.
+    values: [climate, humidity, temperature, skin_type, lash_health, region,
+             regulation, product_specific, skill_dependent, none]
+
+  actionability:
+    required: true
+    cardinality: one
+    values:
+      informational: Background understanding only
+      advisory:      Suggests a direction
+      actionable:    The reader can do something with it directly
+      procedural:    Contains executable steps
+      decisional:    Supports a specific decision with criteria

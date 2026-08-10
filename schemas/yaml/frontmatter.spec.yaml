@@ -1,0 +1,135 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Obsidian frontmatter contract
+#
+# Frontmatter is the machine-readable surface of the vault. It must stay FLAT —
+# Dataview cannot query nested structures reliably, and the vault's value as an
+# operational instrument depends on those queries working.
+#
+# Rendering rules:
+#   - Nested card data (parameters, sources, evidence ledger) renders into the
+#     BODY as tables, never into frontmatter.
+#   - A handful of fields are duplicated into `tags` because Obsidian's tag pane
+#     and graph-view colouring work on tags while Dataview works on properties.
+# ═══════════════════════════════════════════════════════════════════════════
+
+version: "1.0.0"
+
+note_types:
+
+  knowledge-card:
+    path: "10-Knowledge/{domain_folder}/{title}.md"
+    required:
+      id:                { type: string,  pattern: "^kc_[A-Z]{3}_[a-z0-9-]+$" }
+      type:              { type: string,  const: knowledge-card }
+      title:             { type: string }
+      version:           { type: integer }
+      schema_version:    { type: string }
+      domain:            { type: string,  enum_ref: "taxonomy.domains[].code" }
+      domain_name:       { type: string }
+      subcategory:       { type: string }
+      knowledge_type:    { type: string,  enum_ref: "facets.knowledge_type" }
+      epistemic_status:  { type: string,  enum_ref: "facets.epistemic_status" }
+      risk_tier:         { type: integer, min: 0, max: 4 }
+      confidence:        { type: number,  min: 0, max: 1 }
+      confidence_band:   { type: string }
+      status:            { type: string,  enum: [draft, in_review, published, contested, deprecated] }
+      created:           { type: date }
+      updated:           { type: date }
+      tags:              { type: list }
+    optional:
+      aliases:               { type: list }
+      secondary_domains:     { type: list }
+      skill_level:           { type: string }
+      audience:              { type: list }
+      service_lifecycle:     { type: list }
+      context_sensitivity:   { type: list }
+      actionability:         { type: string }
+      claim_count:           { type: integer }
+      supporting_claims:     { type: integer }
+      contradicting_claims:  { type: integer }
+      independent_groups:    { type: integer }
+      distinct_creators:     { type: integer }
+      highest_evidence_tier: { type: string }
+      has_parameters:        { type: boolean }
+      has_contradictions:    { type: boolean }
+      lashos_usable:         { type: boolean }
+      ai_features:           { type: list }
+      last_evidence:         { type: date }
+      source_ids:            { type: list }
+    tag_mirrors:
+      - "lke/card"
+      - "domain/{domain_folder_slug}"
+      - "type/{knowledge_type}"
+      - "conf/{confidence_band}"
+      - "risk/{risk_tier}"
+      - "status/{status}"
+
+  source:
+    path: "30-Sources/{published} {creator} - {title}.md"
+    required:
+      id:       { type: string, pattern: "^src_" }
+      type:     { type: string, const: source }
+      platform: { type: string }
+      tags:     { type: list }
+    optional:
+      creator:             { type: string }
+      published:           { type: date }
+      duration_min:        { type: number }
+      reliability:         { type: number }
+      transcript_quality:  { type: string }
+      commercial_context:  { type: string }
+      independence_group:  { type: string }
+      claims_extracted:    { type: integer }
+      cards_contributed:   { type: integer }
+      url:                 { type: string }
+    tag_mirrors: ["lke/source", "platform/{platform}", "creator/{creator_slug}"]
+
+  entity:
+    path: "20-Entities/{folder}/{canonical_name}.md"
+    required:
+      id:          { type: string, pattern: "^ent_" }
+      type:        { type: string, const: entity }
+      entity_type: { type: string, enum_ref: "entity_types.types" }
+      tags:        { type: list }
+    optional:
+      aliases:     { type: list }
+      risk_flags:  { type: list }
+      card_count:  { type: integer }
+    tag_mirrors: ["lke/entity", "entity/{entity_type}"]
+
+  contradiction:
+    path: "50-Contradictions/{title}.md"
+    required:
+      id:                { type: string, pattern: "^ctr_" }
+      type:              { type: string, const: contradiction }
+      conflict_type:     { type: string }
+      resolution_status: { type: string }
+      ai_handling:       { type: string }
+      tags:              { type: list }
+    optional:
+      weight_a:   { type: number }
+      weight_b:   { type: number }
+      risk_tier:  { type: integer }
+      detected:   { type: date }
+    tag_mirrors: ["lke/contradiction", "status/{resolution_status}"]
+
+# ── Round-trip safety ─────────────────────────────────────────────────────
+human_override:
+  start_marker: "<!-- LKE:HUMAN-OVERRIDE:START -->"
+  end_marker:   "<!-- LKE:HUMAN-OVERRIDE:END -->"
+  rules:
+    - Content between markers is read back into cards.human_override_md BEFORE any export.
+    - Content outside markers is machine-owned and overwritten without warning.
+    - Exactly one override block per note; a second block is a validation error.
+    - Markers are never removed by the exporter, even when the block is empty.
+
+# ── Export safety ─────────────────────────────────────────────────────────
+export:
+  deterministic: true
+  staging_dir: ".lke-staging"
+  max_deletion_ratio: 0.05
+  on_threshold_exceeded: halt_and_require_confirmation
+  changelog_path: "00-System/Changelog.md"
+  link_rewriting:
+    merged_cards: redirect_to_canonical
+    leave_alias_stub: true

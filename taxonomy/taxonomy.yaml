@@ -1,0 +1,301 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# LashOS Master Taxonomy — machine-readable
+# Human-readable narrative: docs/01-master-taxonomy.md
+#
+# GOVERNANCE
+#   - `code` is IMMUTABLE. Display names may change; codes never do.
+#   - Additive by default. Retire nodes with `deprecated: true` + `superseded_by`.
+#   - Cards record the taxonomy_version they were classified under.
+# ═══════════════════════════════════════════════════════════════════════════
+
+version: "1.0.0"
+updated: "2026-08-10"
+
+domains:
+
+  - code: ANA
+    name: Anatomy & Biology
+    folder: "01-Anatomy-Biology"
+    recency_halflife_years: 15
+    description: The biological substrate every technical decision rests on.
+    subcategories:
+      - Eye Anatomy
+      - Natural Lash Anatomy
+      - Hair Science
+      - Growth Cycles
+      - Eye Shape Morphology
+      - Lid & Crease Architecture
+      - Facial Proportion
+      - Ocular Physiology
+      - Population Variation
+
+  - code: HLT
+    name: Lash Health & Safety
+    folder: "02-Lash-Health-Safety"
+    recency_halflife_years: 8
+    default_risk_tier: 2
+    description: Client and artist safety. Highest-risk domain in the corpus.
+    subcategories:
+      - Damage Mechanisms
+      - Breakage & Weakening
+      - Allergic Reactions
+      - Irritant vs Allergic Differentiation
+      - Chemical Injury
+      - Contraindications
+      - Infection & Microbiology
+      - Formaldehyde & Off-gassing
+      - Artist Occupational Health
+      - Sanitation & Sterilization
+      - Patch Testing
+      - Medical Screening & Intake
+      - Incident Response
+      - Regulatory & Compliance
+
+  - code: ASM
+    name: Natural Lash Assessment
+    folder: "03-Natural-Lash-Assessment"
+    recency_halflife_years: 10
+    subcategories:
+      - Lash Trait Analysis
+      - Lash Line Survey
+      - Weight Load Calculation
+      - Health Grading
+      - Eligibility & Risk Scoring
+      - Assessment Documentation
+
+  - code: STY
+    name: Styling & Design
+    folder: "04-Styling-Design"
+    recency_halflife_years: 2
+    subcategories:
+      - Style Archetypes
+      - Volume Systems
+      - Style Selection Logic
+      - Corrective Design
+      - Personalisation Factors
+      - Aesthetic Principles
+      - Occasion Styling
+      - Inclusive Styling
+      - Trend Cycles
+
+  - code: MAP
+    name: Lash Mapping
+    folder: "05-Lash-Mapping"
+    recency_halflife_years: 6
+    subcategories:
+      - Mapping Fundamentals
+      - Length Placement
+      - Curl Placement
+      - Diameter Placement
+      - Texture Mapping
+      - Symmetry & Correction
+      - Layering
+      - Map Libraries
+
+  - code: RET
+    name: Retention Science
+    folder: "06-Retention-Science"
+    recency_halflife_years: 6
+    subcategories:
+      - Retention Definition & Measurement
+      - Bond Mechanics
+      - Environmental Factors
+      - Client Lifestyle Factors
+      - Skin Physiology
+      - Hormonal & Medical Factors
+      - Aftercare Protocols
+      - Cleansing Science
+      - Retention Diagnostics
+      - Shedding Interpretation
+      - Fill Cycle Economics
+
+  - code: ADH
+    name: Adhesive Science
+    folder: "07-Adhesive-Science"
+    recency_halflife_years: 5
+    subcategories:
+      - Cyanoacrylate Chemistry
+      - Cure Kinetics
+      - Humidity & Temperature Response
+      - Viscosity & Dry Time
+      - Pigments & Additives
+      - Storage & Shelf Life
+      - Bottle Handling
+      - Adhesive Selection Logic
+      - Curing Interventions
+      - Ancillary Chemistry
+      - Adhesive Troubleshooting
+      - Failure Mode Analysis
+      - Adhesive Testing Protocol
+
+  - code: APP
+    name: Application Technique
+    folder: "08-Application-Technique"
+    recency_halflife_years: 6
+    subcategories:
+      - Isolation
+      - Attachment & Placement
+      - Adhesive Pickup
+      - Fan Making
+      - Handmade vs Promade
+      - Directional Control
+      - Speed & Efficiency
+      - Ergonomics & Longevity
+      - Tools & Grip
+      - Sectioning & Workflow
+      - Bottom Lash Application
+      - Fills
+      - Removal
+      - Client Positioning & Comfort
+      - Environment Control
+      - Technique Fault Diagnosis
+
+  - code: PRD
+    name: Products & Materials
+    folder: "09-Products-Materials"
+    recency_halflife_years: 2.5
+    subcategories:
+      - Adhesives
+      - Extensions
+      - Primers & Cleansers
+      - Removers
+      - Bonders & Sealants
+      - Tools
+      - Eye Pads & Tapes
+      - Lash Lift & Tint Products
+      - Consumables & Unit Economics
+      - Product Evaluation Framework
+      - Supply Chain & Manufacturing
+      - Counterfeits & Quality Risk
+
+  - code: ADJ
+    name: Adjacent Services
+    folder: "10-Adjacent-Services"
+    recency_halflife_years: 5
+    default_risk_tier: 2
+    subcategories:
+      - Lash Lift & Perm
+      - Lash Tinting
+      - Brow Lamination
+      - Brow Shaping & Mapping
+      - Service Sequencing
+      - Hybrid Offerings
+
+  - code: CON
+    name: Consultation & Client Experience
+    folder: "11-Consultation-Client-Experience"
+    recency_halflife_years: 5
+    subcategories:
+      - Consultation Framework
+      - Expectation Setting
+      - Contraindication Screening
+      - Documentation
+      - Consent & Liability
+      - Communication Scripts
+      - Experience Design
+      - Difficult Conversations
+      - Complaints & Redos
+      - Follow-up & Aftercare Delivery
+
+  - code: PSY
+    name: Client Psychology & Behaviour
+    folder: "12-Client-Psychology"
+    recency_halflife_years: 6
+    subcategories:
+      - Motivation & Identity
+      - Trust & Authority
+      - Loyalty Dynamics
+      - Price Psychology
+      - Anxiety & Sensory Needs
+      - Body Image & Emotional Dynamics
+      - Segmentation & Personas
+      - Churn Prediction
+      - Referral Psychology
+
+  - code: BIZ
+    name: Business & Operations
+    folder: "13-Business-Operations"
+    recency_halflife_years: 3
+    subcategories:
+      - Business Models
+      - Pricing & Profitability
+      - Booking & Scheduling
+      - Cancellation & Policy Design
+      - Capacity & Utilisation
+      - Financial Management
+      - KPIs
+      - Legal & Insurance
+      - Team & Hiring
+      - Systems & SOPs
+      - Studio Environment
+      - Inventory Management
+      - Scaling
+      - Diversification & Exit
+      - Sustainability & Burnout
+
+  - code: MKT
+    name: Marketing & Brand
+    folder: "14-Marketing-Brand"
+    recency_halflife_years: 2
+    subcategories:
+      - Positioning & Niche
+      - Content Strategy
+      - Lash Photography & Video
+      - Portfolio Construction
+      - Local Discovery
+      - Paid Acquisition
+      - Offers & Promotions
+      - Funnels & Conversion
+      - Reputation
+      - Personal & Educator Brand
+      - Community & Collaboration
+
+  - code: EDU
+    name: Education & Pedagogy
+    folder: "15-Education-Pedagogy"
+    recency_halflife_years: 6
+    subcategories:
+      - Learning Pathways
+      - Curriculum Design
+      - Skill Assessment
+      - Practice Methodology
+      - Learner Failure Modes
+      - Certification Landscape
+      - Mentorship & Coaching
+      - Teaching Technique
+      - Course Business
+      - Continuing Education
+
+  - code: IND
+    name: Industry Intelligence
+    folder: "16-Industry-Intelligence"
+    recency_halflife_years: 1.5
+    subcategories:
+      - Market Structure
+      - Regional Variation
+      - Regulatory Landscape
+      - Supply Chain
+      - Competitive Landscape
+      - Innovation Watch
+      - Scientific Evidence Base
+      - Myth & Misinformation Registry
+      - Thought Leader Map
+
+  - code: LOS
+    name: LashOS Intelligence
+    folder: "17-LashOS-Intelligence"
+    recency_halflife_years: 3
+    meta: true
+    description: >
+      Assets the system produces about itself — the bridge from knowledge to product.
+      These are derived, not extracted.
+    subcategories:
+      - Decision Models
+      - Diagnostic Trees
+      - Prediction Features
+      - Recommendation Rules
+      - Safety Gates
+      - Persona & Prompt Assets
+      - Evaluation Sets
+      - Open Questions
+      - Course Blueprints

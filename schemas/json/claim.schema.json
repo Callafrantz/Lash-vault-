@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lashos.io/schemas/claim.schema.json",
+  "title": "Claim",
+  "description": "One assertion, by one speaker, at one timestamp. IMMUTABLE. Claims are never merged or deleted — their count is the evidence signal.",
+  "type": "object",
+  "required": [
+    "id", "source_id", "chunk_id", "verbatim_quote", "normalized_statement",
+    "claim_type", "evidence_tier", "hedge_level"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^clm_[0-9a-f]{12}$",
+            "description": "blake3(source_id, char_span, normalized_text)[:12] — idempotent by construction." },
+    "source_id": { "type": "string" },
+    "chunk_id": { "type": "string" },
+    "speaker_id": { "type": ["string","null"] },
+    "t_start": { "type": ["number","null"], "minimum": 0 },
+    "t_end": { "type": ["number","null"], "minimum": 0 },
+
+    "verbatim_quote": {
+      "type": "string", "minLength": 10,
+      "description": "MUST appear character-for-character in the source raw_text. Verified programmatically after extraction; a mismatch discards the claim."
+    },
+    "normalized_statement": {
+      "type": "string", "minLength": 10,
+      "description": "Decontextualised: pronouns and deixis resolved so the claim stands alone. Hedging is NOT encoded here — it lives in hedge_level."
+    },
+
+    "claim_type": {
+      "type": "string",
+      "enum": ["definitional","causal","correlational","prescriptive","parametric",
+               "comparative","predictive","evaluative","experiential","negation"]
+    },
+    "subject": { "type": ["string","null"], "description": "Entity ID or surface form" },
+    "predicate": { "type": ["string","null"] },
+    "object": { "type": ["string","null"] },
+    "polarity": { "type": "string", "enum": ["positive","negative","nonlinear","neutral"], "default": "positive" },
+    "scope": {
+      "type": "string",
+      "enum": ["universal","general","conditional","personal","situational"],
+      "default": "general"
+    },
+    "conditions": {
+      "type": "array", "default": [],
+      "items": {
+        "type": "object",
+        "required": ["variable","operator","value"],
+        "properties": {
+          "variable": { "type": "string" },
+          "operator": { "type": "string", "enum": ["<","<=","=",">=",">","in","between","not"] },
+          "value": {},
+          "unit": { "type": ["string","null"] }
+        }
+      }
+    },
+    "parameters": {
+      "type": "array", "default": [],
+      "items": {
+        "type": "object",
+        "required": ["name","value"],
+        "properties": {
+          "name": { "type": "string" },
+          "value": {},
+          "unit": { "type": ["string","null"] },
+          "bound": { "type": ["string","null"], "enum": ["lower","upper","exact","range",null] },
+          "precision": { "type": "string", "enum": ["stated","approximate","inferred"], "default": "stated" }
+        }
+      }
+    },
+
+    "hedge_level": {
+      "type": "number", "minimum": 0, "maximum": 1,
+      "description": "0 = flat assertion, 1 = heavily hedged. Preserving this is what distinguishes 'I think maybe 60?' from '60, period'."
+    },
+    "certainty_language": {
+      "type": "string",
+      "enum": ["assertive","confident","hedged","speculative","questioning"]
+    },
+    "evidence_tier": {
+      "type": "string",
+      "enum": ["peer_reviewed","regulatory","manufacturer_spec","controlled_test",
+               "structured_experience","expert_assertion","anecdote","hearsay","marketing"]
+    },
+    "evidence_offered": {
+      "type": ["string","null"],
+      "enum": ["none","anecdote","personal_testing","client_data","manufacturer_doc",
+               "citation","demonstration", null]
+    },
+    "sample_basis": { "type": ["string","null"], "description": "e.g. '8 years, ~4000 clients'" },
+    "is_first_person_experience": { "type": "boolean", "default": false },
+    "is_reported_from_other": {
+      "type": "boolean", "default": false,
+      "description": "Feeds echo-chamber detection — repeating someone else's claim is not independent evidence."
+    },
+    "reported_from": { "type": ["string","null"] },
+
+    "concept_id": { "type": ["string","null"] },
+    "concept_confidence": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
+    "entities": { "type": "array", "items": { "type": "string" }, "default": [] },
+
+    "extraction_model": { "type": ["string","null"] },
+    "prompt_version": { "type": ["string","null"] },
+    "pipeline_version": { "type": ["string","null"] },
+    "superseded_by": { "type": ["string","null"] },
+    "extracted_at": { "type": "string", "format": "date-time" }
+  }
+}

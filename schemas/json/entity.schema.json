@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lashos.io/schemas/entity.schema.json",
+  "title": "Entity",
+  "description": "A thing the knowledge is about. Entities carry the structured attributes that constraint-satisfaction features (product recommendation, contraindication screening) query directly.",
+  "type": "object",
+  "required": ["id","entity_type","canonical_name"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^ent_[a-z_]+_[a-z0-9-]+$" },
+    "entity_type": {
+      "type": "string",
+      "enum": ["concept","technique","style","product","product_category","brand","tool",
+               "chemical","material","condition","symptom","anatomical_structure","eye_shape",
+               "lash_trait","environmental_factor","metric","business_process","role","person",
+               "organization","regulation","region","client_segment","protocol","myth","phenomenon"]
+    },
+    "canonical_name": { "type": "string" },
+    "aliases": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "description": { "type": ["string","null"] },
+
+    "attributes": {
+      "type": "object",
+      "description": "Type-specific structured attributes. Queried directly by the recommender.",
+      "additionalProperties": true
+    },
+    "external_ids": { "type": "object", "additionalProperties": { "type": "string" }, "default": {} },
+    "risk_flags": {
+      "type": "array", "default": [],
+      "items": { "type": "string",
+                 "enum": ["sensitiser","irritant","corrosive","flammable","ocular_hazard",
+                          "respiratory_hazard","regulated","contraindicated_pregnancy","allergen"] }
+    },
+
+    "mention_count": { "type": "integer", "default": 0 },
+    "source_count": { "type": "integer", "default": 0 },
+    "merged_into": { "type": ["string","null"] },
+    "status": { "type": "string", "enum": ["candidate","active","merged","deprecated"], "default": "candidate" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+
+  "allOf": [
+    {
+      "if": { "properties": { "entity_type": { "const": "product" } } },
+      "then": {
+        "properties": {
+          "attributes": {
+            "properties": {
+              "brand": { "type": "string" },
+              "category": { "type": "string" },
+              "optimal_humidity_min": { "type": "number" },
+              "optimal_humidity_max": { "type": "number" },
+              "optimal_temp_min_c": { "type": "number" },
+              "optimal_temp_max_c": { "type": "number" },
+              "set_time_seconds": { "type": "number" },
+              "viscosity": { "type": "string", "enum": ["thin","standard","thick"] },
+              "fume_level": { "type": "string", "enum": ["low","medium","high"] },
+              "carbon_black": { "type": "boolean" },
+              "shelf_life_months_unopened": { "type": "number" },
+              "shelf_life_weeks_opened": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "entity_type": { "const": "condition" } } },
+      "then": {
+        "properties": {
+          "attributes": {
+            "properties": {
+              "icd_code": { "type": "string" },
+              "contraindicates_service": { "type": "boolean" },
+              "requires_medical_referral": { "type": "boolean" },
+              "presenting_signs": { "type": "array", "items": { "type": "string" } },
+              "differentials": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "risk_flags": { "minItems": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "entity_type": { "const": "eye_shape" } } },
+      "then": {
+        "properties": {
+          "attributes": {
+            "properties": {
+              "lid_space": { "type": "string", "enum": ["minimal","small","medium","large"] },
+              "crease_visible": { "type": "boolean" },
+              "outer_corner_direction": { "type": "string", "enum": ["upturned","neutral","downturned"] },
+              "set_width": { "type": "string", "enum": ["close","average","wide"] },
+              "protrusion": { "type": "string", "enum": ["deep_set","average","protruding"] }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

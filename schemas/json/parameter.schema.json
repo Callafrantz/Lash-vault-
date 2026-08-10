@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lashos.io/schemas/parameter.schema.json",
+  "title": "Parameter",
+  "description": "A typed, unit-bearing, condition-scoped value extracted from knowledge. This is what makes the knowledge base computable rather than merely retrievable.",
+  "type": "object",
+  "required": ["name","kind","confidence"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string" },
+    "card_id": { "type": "string" },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "snake_case, drawn from the controlled parameter vocabulary where one exists."
+    },
+    "kind": { "type": "string", "enum": ["scalar","range","threshold","ratio","enum","duration","curve"] },
+
+    "value": { "type": ["number","string","null"] },
+    "min": { "type": ["number","null"] },
+    "max": { "type": ["number","null"] },
+    "operator": { "type": ["string","null"], "enum": ["<","<=","=",">=",">", null] },
+    "enum_values": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "curve_points": {
+      "type": "array", "default": [],
+      "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }
+    },
+
+    "unit": {
+      "type": ["string","null"],
+      "enum": ["%RH","°C","°F","mm","mg","g","s","min","h","day","week","month","year",
+               "USD","GBP","EUR","ZAR","count","ratio","percent","D","dB","lux", null]
+    },
+    "applies_to": { "type": ["string","null"], "description": "Entity ID this parameter is scoped to." },
+    "condition": { "type": ["string","null"], "description": "Human-readable applicability condition." },
+    "conditions": {
+      "type": "array", "default": [],
+      "items": {
+        "type": "object",
+        "required": ["variable","operator","value"],
+        "properties": {
+          "variable": { "type": "string" },
+          "operator": { "type": "string" },
+          "value": {},
+          "unit": { "type": ["string","null"] }
+        }
+      }
+    },
+
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "disputed": { "type": "boolean", "default": false },
+    "variance_note": { "type": ["string","null"], "description": "e.g. 'manufacturer ranges vary 35–70%; defer to product spec'." },
+    "source_claims": { "type": "array", "items": { "type": "string" }, "default": [] }
+  },
+
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "range" } } },
+      "then": { "required": ["min","max"] } },
+    { "if": { "properties": { "kind": { "const": "scalar" } } },
+      "then": { "required": ["value"] } },
+    { "if": { "properties": { "kind": { "const": "threshold" } } },
+      "then": { "required": ["value","operator"] } },
+    { "if": { "properties": { "kind": { "const": "enum" } } },
+      "then": { "required": ["enum_values"] } }
+  ]
+}

@@ -1,0 +1,113 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Entity types — the things knowledge cards are ABOUT.
+#
+# `attributes` are structured, queryable fields that constraint-satisfaction
+# features (product recommendation, contraindication screening, style matching)
+# query DIRECTLY, without passing through a language model.
+# ═══════════════════════════════════════════════════════════════════════════
+
+version: "1.0.0"
+
+types:
+
+  concept:              { vault_folder: null, description: Abstract idea with no physical referent }
+  technique:            { vault_folder: null }
+  style:
+    vault_folder: Styles
+    attributes: [volume_system, texture, curl_family, suits_eye_shapes, maintenance_level, wear_impression]
+
+  product:
+    vault_folder: Products
+    attributes: [brand, category, optimal_humidity_min, optimal_humidity_max,
+                 optimal_temp_min_c, optimal_temp_max_c, set_time_seconds, viscosity,
+                 fume_level, carbon_black, shelf_life_months_unopened, shelf_life_weeks_opened,
+                 price_band, region_availability]
+    note: The recommender queries these attributes directly — they are the product's machine-readable spec.
+
+  product_category:     { vault_folder: Products }
+  brand:
+    vault_folder: Brands
+    attributes: [country, founded, product_categories, oem_or_own_manufacture, reputation_notes]
+
+  tool:
+    vault_folder: Tools
+    attributes: [tool_class, material, geometry, use_case, skill_level]
+
+  chemical:
+    vault_folder: Chemicals
+    attributes: [cas_number, chemical_class, polymerisation_trigger, hazard_class, exposure_limit]
+
+  material:             { vault_folder: null, attributes: [composition, properties] }
+
+  condition:
+    vault_folder: Conditions
+    risk_relevant: true
+    attributes: [icd_code, contraindicates_service, requires_medical_referral,
+                 presenting_signs, differentials, typical_duration]
+    note: >
+      Every condition entity is risk_tier >= 3 by default. Nothing here may be used for
+      diagnostic assertion by an AI feature.
+
+  symptom:
+    vault_folder: Conditions
+    attributes: [observable_signs, onset_timing, associated_conditions]
+
+  anatomical_structure: { vault_folder: null, attributes: [region, function] }
+
+  eye_shape:
+    vault_folder: Eye-Shapes
+    attributes: [lid_space, crease_visible, outer_corner_direction, set_width, protrusion,
+                 suits_curls, suits_styles, corrective_strategy]
+
+  lash_trait:
+    vault_folder: null
+    attributes: [trait_class, measurement_method, typical_range, affects]
+
+  environmental_factor:
+    vault_folder: null
+    attributes: [measurement_unit, optimal_range, measurement_tool]
+
+  metric:
+    vault_folder: null
+    attributes: [formula, unit, benchmark_good, benchmark_poor, measurement_frequency]
+
+  business_process:     { vault_folder: null }
+  role:                 { vault_folder: null }
+
+  person:
+    vault_folder: People
+    attributes: [role, region, domains_of_expertise, reliability_score, independence_group]
+    note: Mirrors the creators table for vault navigation; the DB record is authoritative.
+
+  organization:         { vault_folder: Organizations }
+  regulation:
+    vault_folder: Organizations
+    risk_relevant: true
+    attributes: [jurisdiction, authority, effective_date, scope, penalty]
+
+  region:
+    vault_folder: Regions
+    attributes: [iso_code, typical_climate_band, regulatory_regime, market_notes]
+
+  client_segment:       { vault_folder: null, attributes: [demographics, behaviour, needs, price_sensitivity] }
+  protocol:             { vault_folder: null, attributes: [steps, duration, prerequisites] }
+
+  myth:
+    vault_folder: null
+    attributes: [claim, origin_traced_to, prevalence, corrective_card, harm_level]
+    note: >
+      Myths are entities, not merely low-confidence cards. Tracking them explicitly is what
+      lets the AI say "you may have heard X — here is why that is not right" rather than
+      simply omitting the topic.
+
+  phenomenon:           { vault_folder: null, description: An observable process or effect }
+
+# ── Entity promotion policy ───────────────────────────────────────────────
+promotion:
+  candidate_threshold_sources: 3
+  description: >
+    Unresolved mentions become entity candidates only after appearing in 3+ distinct sources.
+    Below that they are held as unlinked mentions — the corpus is full of one-off brand
+    mentions that should not each become a permanent entity.
+  auto_promote_types: [product, brand, condition, chemical]
+  review_required_types: [person, organization, regulation, myth]

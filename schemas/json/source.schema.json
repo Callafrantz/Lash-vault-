@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lashos.io/schemas/source.schema.json",
+  "title": "Source",
+  "description": "One transcript and its provenance metadata. content_hash is unique: the same episode on three platforms is ONE source with three distributions, never three corroborating sources.",
+  "type": "object",
+  "required": ["id","title","platform","content_hash"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^src_[a-z]+_\\d{6}_[0-9a-f]{8}$" },
+    "title": { "type": "string" },
+    "creator_id": { "type": ["string","null"] },
+    "additional_speakers": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "platform": {
+      "type": "string",
+      "enum": ["podcast","youtube","instagram","tiktok","course","interview","panel",
+               "masterclass","webinar","article","book","paper","other"]
+    },
+    "url": { "type": ["string","null"], "format": "uri" },
+    "published_at": { "type": ["string","null"], "format": "date" },
+    "duration_seconds": { "type": ["integer","null"], "minimum": 0 },
+    "language": { "type": "string", "default": "en" },
+    "region_context": { "type": ["string","null"], "description": "ISO region — retention and regulation advice is region-dependent." },
+    "format": {
+      "type": ["string","null"],
+      "enum": ["monologue","interview","panel","lecture","qa","demo", null]
+    },
+    "commercial_context": {
+      "type": "string",
+      "enum": ["organic","sponsored","own_product","affiliate","educational_paid"],
+      "default": "organic",
+      "description": "Drives the commercial-bias penalty in confidence scoring."
+    },
+
+    "content_hash": { "type": "string" },
+    "storage_uri": { "type": ["string","null"] },
+    "word_count": { "type": ["integer","null"] },
+    "has_timestamps": { "type": "boolean", "default": false },
+    "has_speaker_labels": { "type": "boolean", "default": false },
+    "asr_confidence": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
+    "transcript_quality": { "type": ["string","null"], "enum": ["verbatim","good","fair","poor", null] },
+
+    "independence_group": {
+      "type": ["string","null"],
+      "description": "Sources sharing a lineage or origin count as ONE independent voice for corroboration."
+    },
+    "reliability_score": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
+
+    "distributions": {
+      "type": "array", "default": [],
+      "description": "Other platforms carrying the same content_hash.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "platform": { "type": "string" },
+          "url": { "type": "string" },
+          "published_at": { "type": ["string","null"], "format": "date" }
+        }
+      }
+    },
+
+    "processing_stage": {
+      "type": "string",
+      "enum": ["ingested","normalized","segmented","extracted","resolved","complete","quarantined","failed"],
+      "default": "ingested"
+    },
+    "pipeline_version": { "type": ["string","null"] },
+    "claims_extracted": { "type": "integer", "default": 0 },
+    "quarantine_reason": { "type": ["string","null"] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

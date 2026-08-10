@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lashos.io/schemas/extraction_output.schema.json",
+  "title": "S2 Claim Extraction Output",
+  "description": "The structured-output contract for stage S2. Model responses are validated against this BEFORE anything reaches the database. Validation failure means retry-once-then-quarantine — never coerce.",
+  "type": "object",
+  "required": ["chunk_id","claims"],
+  "additionalProperties": false,
+  "properties": {
+    "chunk_id": { "type": "string" },
+    "no_claims_reason": {
+      "type": ["string","null"],
+      "enum": ["conversational","promotional","off_topic","unintelligible","duplicate_of_prior", null],
+      "description": "Required when claims is empty — an empty array with no reason is treated as an extraction failure."
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["verbatim_quote","normalized_statement","claim_type",
+                     "evidence_tier","hedge_level","certainty_language"],
+        "additionalProperties": false,
+        "properties": {
+          "verbatim_quote": {
+            "type": "string", "minLength": 10,
+            "description": "EXACT substring of the chunk raw_text. Checked programmatically; no near-matches accepted."
+          },
+          "normalized_statement": { "type": "string", "minLength": 10 },
+          "claim_type": {
+            "type": "string",
+            "enum": ["definitional","causal","correlational","prescriptive","parametric",
+                     "comparative","predictive","evaluative","experiential","negation"]
+          },
+          "subject": { "type": ["string","null"] },
+          "predicate": { "type": ["string","null"] },
+          "object": { "type": ["string","null"] },
+          "polarity": { "type": "string", "enum": ["positive","negative","nonlinear","neutral"] },
+          "scope": { "type": "string", "enum": ["universal","general","conditional","personal","situational"] },
+          "conditions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["variable","operator","value"],
+              "properties": {
+                "variable": { "type": "string" },
+                "operator": { "type": "string", "enum": ["<","<=","=",">=",">","in","between","not"] },
+                "value": {},
+                "unit": { "type": ["string","null"] }
+              }
+            }
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name","value"],
+              "properties": {
+                "name": { "type": "string" },
+                "value": {},
+                "unit": { "type": ["string","null"] },
+                "bound": { "type": ["string","null"] },
+                "precision": { "type": "string", "enum": ["stated","approximate","inferred"] }
+              }
+            }
+          },
+          "hedge_level": { "type": "number", "minimum": 0, "maximum": 1 },
+          "certainty_language": {
+            "type": "string",
+            "enum": ["assertive","confident","hedged","speculative","questioning"]
+          },
+          "evidence_tier": {
+            "type": "string",
+            "enum": ["peer_reviewed","regulatory","manufacturer_spec","controlled_test",
+                     "structured_experience","expert_assertion","anecdote","hearsay","marketing"]
+          },
+          "evidence_offered": {
+            "type": ["string","null"],
+            "enum": ["none","anecdote","personal_testing","client_data","manufacturer_doc",
+                     "citation","demonstration", null]
+          },
+          "sample_basis": { "type": ["string","null"] },
+          "is_first_person_experience": { "type": "boolean" },
+          "is_reported_from_other": { "type": "boolean" },
+          "reported_from": { "type": ["string","null"] },
+          "candidate_entities": { "type": "array", "items": { "type": "string" } },
+          "suggested_domain": {
+            "type": ["string","null"],
+            "enum": ["ANA","HLT","ASM","STY","MAP","RET","ADH","APP","PRD","ADJ",
+                     "CON","PSY","BIZ","MKT","EDU","IND","LOS", null]
+          },
+          "risk_signal": {
+            "type": "integer", "minimum": 0, "maximum": 4,
+            "description": "Extractor's risk-tier estimate — medical, safety or regulatory content flagged early."
+          },
+          "extraction_certainty": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    }
+  }
+}

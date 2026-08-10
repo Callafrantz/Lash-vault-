@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lashos.io/schemas/relation.schema.json",
+  "title": "Relation",
+  "description": "A typed, directed, weighted, conditional edge in the knowledge graph. strength and confidence are ORTHOGONAL: strength is effect size, confidence is belief the edge exists at all.",
+  "type": "object",
+  "required": ["id","subject_id","subject_type","predicate","object_id","object_type","strength","confidence"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^rel_[0-9a-f]{12}$" },
+    "subject_id": { "type": "string" },
+    "subject_type": { "type": "string", "enum": ["card","entity"] },
+    "predicate": { "$ref": "#/$defs/predicate" },
+    "object_id": { "type": "string" },
+    "object_type": { "type": "string", "enum": ["card","entity"] },
+
+    "polarity": { "type": "string", "enum": ["positive","negative","nonlinear","neutral"], "default": "positive" },
+    "strength": { "type": "number", "minimum": 0, "maximum": 1, "description": "Magnitude of the effect." },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1, "description": "Belief the relationship exists." },
+    "temporality": { "type": "string", "enum": ["immediate","delayed","cumulative","permanent"], "default": "immediate" },
+    "directionality": { "type": "string", "enum": ["directed","bidirectional"], "default": "directed" },
+
+    "conditions": {
+      "type": "array", "default": [],
+      "description": "The edge only fires when these are satisfied by the query context.",
+      "items": {
+        "type": "object",
+        "required": ["variable","operator","value"],
+        "properties": {
+          "variable": { "type": "string" },
+          "operator": { "type": "string", "enum": ["<","<=","=",">=",">","in","between","not"] },
+          "value": {},
+          "unit": { "type": ["string","null"] }
+        }
+      }
+    },
+    "mechanism_card_id": { "type": ["string","null"], "description": "The card explaining WHY this edge holds." },
+    "evidence_claims": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "extraction_method": {
+      "type": "string",
+      "enum": ["structural","claim_derived","model_inferred","human"],
+      "default": "model_inferred"
+    },
+    "status": { "type": "string", "enum": ["active","superseded","rejected"], "default": "active" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+
+  "$defs": {
+    "predicate": {
+      "type": "string",
+      "enum": [
+        "causes","affects","prevents","mitigates","exacerbates","correlates_with",
+        "trade_off_with","threshold_for",
+        "indicates","differentiates_from","diagnosed_by","presents_as",
+        "requires","prerequisite_of","precedes","part_of","performed_with","produces",
+        "subclass_of","instance_of","alias_of","defined_by","measured_by","quantified_by",
+        "applies_to","contraindicated_with","suitable_for","unsuitable_for",
+        "optimal_range_for","compatible_with","incompatible_with",
+        "supports","contradicts","refines","supersedes","debunks","derived_from",
+        "alternative_to","substitutes_for","manufactured_by","distributed_by",
+        "priced_at","used_in_service","drives_metric"
+      ]
+    }
+  },
+
+  "allOf": [
+    {
+      "if": { "properties": { "extraction_method": { "const": "model_inferred" } } },
+      "then": { "properties": { "confidence": { "maximum": 0.75 } } },
+      "description": "Model-inferred edges are capped at 0.75 confidence and never used alone for risk_tier >= 2 knowledge."
+    }
+  ]
+}

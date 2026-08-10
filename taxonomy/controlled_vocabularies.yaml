@@ -1,0 +1,112 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Controlled vocabularies
+#
+# Enforcing these is what stops "0.07mm", ".07", "7 thickness" and "point zero
+# seven" becoming four different values that no parametric query can match.
+# Normalisation happens at S3 (entity recognition).
+# ═══════════════════════════════════════════════════════════════════════════
+
+version: "1.0.0"
+
+curl:
+  values: [J, B, C, CC, D, DD, L, "L+", LC, LD, M, U]
+  aliases:
+    "j curl": J
+    "b curl": B
+    "c curl": C
+    "cc curl": CC
+    "d curl": D
+    "dd curl": DD
+    "l curl": L
+    "l plus": "L+"
+    "m curl": M
+    "u curl": U
+  ordering_by_lift: [J, B, C, CC, D, DD, U]
+  note: L-family curls have a flat base with a lifted tip — used for hooded and downturned eyes.
+
+diameter_mm:
+  values: [0.03, 0.04, 0.05, 0.06, 0.07, 0.085, 0.10, 0.12, 0.15, 0.18, 0.20]
+  plausible_range: [0.03, 0.30]
+  alias_patterns:
+    - "^\\.?0?(\\d{2})$"      # ".07" / "07" / "0.07"
+  typical_use:
+    classic:     [0.10, 0.12, 0.15, 0.18, 0.20]
+    hybrid:      [0.07, 0.085, 0.10]
+    volume:      [0.05, 0.06, 0.07]
+    mega_volume: [0.03, 0.04, 0.05]
+
+length_mm:
+  min: 5
+  max: 18
+  step: 1
+  plausible_range: [4, 25]
+
+fan_density:
+  values: ["1D","2D","3D","4D","5D","6D","7D","8D","9D","10D",
+           "12D","14D","16D","18D","20D"]
+  systems:
+    classic:     ["1D"]
+    hybrid:      ["1D","2D","3D"]
+    volume:      ["2D","3D","4D","5D","6D"]
+    mega_volume: ["7D","8D","9D","10D","12D","14D","16D","18D","20D"]
+  note: >
+    The volume/mega-volume boundary is itself a definitional contradiction in the corpus
+    (7D+ vs 10D+). Recorded here as the working convention, not as settled fact.
+
+finish:
+  values: [matte, glossy, flat, ellipse, wet_look, cashmere, faux_mink, silk]
+  note: >
+    "Faux mink", "silk" and "cashmere" are marketing terms for PBT fibre variants, not
+    distinct materials. Retained as aliases because the corpus uses them constantly.
+
+eye_shape:
+  values: [almond, round, hooded, monolid, downturned, upturned,
+           deep_set, protruding, close_set, wide_set, asymmetric]
+
+skin_type:
+  values: [dry, normal, combination, oily, very_oily]
+
+lash_health_grade:
+  values: [1, 2, 3, 4, 5]
+  labels:
+    1: severely_compromised
+    2: weakened
+    3: average
+    4: healthy
+    5: exceptional
+
+climate_band:
+  arid:     { rh_min: 0,  rh_max: 30 }
+  low:      { rh_min: 30, rh_max: 45 }
+  optimal:  { rh_min: 45, rh_max: 55 }
+  high:     { rh_min: 55, rh_max: 70 }
+  tropical: { rh_min: 70, rh_max: 100 }
+
+units:
+  values: ["%RH","°C","°F","mm","mg","g","s","min","h","day","week","month","year",
+           "USD","GBP","EUR","ZAR","count","ratio","percent","D","dB","lux"]
+  conversions:
+    "°F_to_°C": "(f - 32) * 5/9"
+
+parameter_names:
+  description: Canonical snake_case parameter names. New names require review.
+  values:
+    - optimal_relative_humidity
+    - optimal_temperature
+    - brittle_bond_threshold
+    - set_time
+    - full_cure_time
+    - base_gap
+    - attachment_length
+    - weight_ratio_limit
+    - max_extension_length
+    - retention_rate_weekly
+    - fill_interval
+    - shelf_life_unopened
+    - shelf_life_opened
+    - glue_dot_refresh_interval
+    - application_rate
+    - processing_time
+    - cost_per_service
+    - rebook_rate
+    - chair_utilisation
