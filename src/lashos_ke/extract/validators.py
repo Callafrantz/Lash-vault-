@@ -134,7 +134,8 @@ VALID_CLAIM_TYPES = frozenset({
 
 VALID_EVIDENCE_TIERS = frozenset({
     "peer_reviewed", "regulatory", "manufacturer_spec", "controlled_test",
-    "structured_experience", "expert_assertion", "anecdote", "hearsay", "marketing",
+    "deliberated_consensus", "structured_experience", "expert_assertion",
+    "anecdote", "hearsay", "marketing",
 })
 
 VALID_SCOPES = frozenset({"universal", "general", "conditional", "personal", "situational"})

@@ -26,7 +26,7 @@ CREATE TYPE claim_type_t AS ENUM (
 
 CREATE TYPE evidence_tier_t AS ENUM (
   'peer_reviewed','regulatory','manufacturer_spec','controlled_test',
-  'structured_experience','expert_assertion','anecdote','hearsay','marketing');
+  'deliberated_consensus','structured_experience','expert_assertion','anecdote','hearsay','marketing');
 
 CREATE TYPE epistemic_status_t AS ENUM (
   'established_science','manufacturer_spec','industry_consensus','contested',

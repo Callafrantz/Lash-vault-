@@ -31,6 +31,11 @@ EVIDENCE_TIER_WEIGHT: dict[str, float] = {
     "regulatory": 0.92,
     "manufacturer_spec": 0.85,
     "controlled_test": 0.75,
+    # Several experienced practitioners debating a question and converging is stronger
+    # than any one of them asserting it — but it is still aggregated opinion, so it sits
+    # below a controlled test. Critically, a consensus counts as ONE independent group,
+    # not one per participant (see extract.deliberation).
+    "deliberated_consensus": 0.68,
     "structured_experience": 0.60,
     "expert_assertion": 0.50,
     "anecdote": 0.30,

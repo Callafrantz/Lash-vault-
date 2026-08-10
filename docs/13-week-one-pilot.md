@@ -30,22 +30,45 @@ proxy for this judgement is exactly the thing you don't yet have.
 
 ## Step 1 — Choose the 10 transcripts (do not skip this)
 
-Ten random transcripts will give you a misleading answer. The sample must be **stratified and
-adversarial**, and it must be content **you already know the truth about** — you cannot audit
-extraction quality on material where you can't tell right from wrong.
+Ten random transcripts will give you a misleading answer. The sample must be **stratified**,
+and it must be content **you already know cold** — not because you need to check whether the
+educators are right, but because you need to spot a mangled extraction in seconds rather than
+re-deriving the truth for every claim.
+
+> **What this measures.** The pilot tests **extraction fidelity, not content accuracy.** A
+> curated corpus of industry-leading educators does not reduce the need for this audit — it
+> changes what you are checking. If the manual says *"for oily clients, drop to 0.05"* and
+> the pipeline records *"drop to 0.05"*, the content was perfect and the extraction still
+> produced dangerous advice. The claim is true; the machine broke it.
 
 | # | Pick a transcript that is… | What it stress-tests |
 | --- | --- | --- |
-| 1–2 | Clean, structured (course module, lecture) | Best case. If it fails here, stop. |
+| 1–2 | The **education manual** (or a chapter of it) | Best case: written, edited, structured. If extraction fails here, stop immediately |
 | 3–4 | Instagram/TikTok short-form | Worst case: no context, fast speech, jargon, poor ASR |
-| 5–6 | Multi-speaker podcast or panel | Speaker attribution and cross-talk |
-| 7–8 | **Numbers-heavy** (humidity, diameters, curls, timings) | Parametric extraction — the feature the whole product rests on |
-| 9 | Contains a claim you **know is contested** (adhesive refrigeration, patch testing, the 24–48h water rule) | Does it capture hedging and the disputed position? |
-| 10 | Contains a claim you **know is wrong** but is confidently stated | Does it record it as a claim without laundering it into fact? |
+| 5–7 | **Multi-speaker podcast that reaches a conclusion** | Deliberation handling — speaker attribution, initial vs revised positions, consensus vs dissent |
+| 8–9 | **Numbers-heavy** (humidity, diameters, curls, timings) | Parametric extraction — the feature the whole product rests on |
+| 10 | A discussion the panel **could not settle** | Does it preserve the open question instead of manufacturing a conclusion? |
 
-Transcripts 9 and 10 matter most. Anyone can extract sentences from a clean lecture. The
-system's actual promise is telling confident-and-wrong apart from confident-and-right, and
-these two transcripts are where that gets tested.
+**Transcripts 5–7 matter most for your corpus.** A panel that debates and converges carries
+more structure than any monologue, and it is where the pipeline has the most to get wrong:
+attributing a position to the wrong speaker, missing that someone changed their mind, or —
+worst — recording a five-person consensus as five independent confirmations. See
+[`extract/deliberation.py`](../src/lashos_ke/extract/deliberation.py) for how that is counted.
+
+Transcript 10 is the sleeper. An open question that leading practitioners could not resolve on
+air is, by definition, a real research gap — and those are among the most commercially
+valuable items the corpus can produce.
+
+### A note on an elite-only corpus
+
+Curating for industry leaders is the right call for content quality. It has one specific
+side effect worth planning for: **leaders are the roots of lineages.** When 200 techs repeat
+something, the leading educator is usually where it originated. Being the best source does not
+make you an independent one.
+
+This is not a reason to doubt your selections. It is a reason to fill in `independence_group`
+carefully in Step 2 — otherwise the corroboration maths will read a single influential voice
+as broad consensus.
 
 Put them in `data/raw/`. VTT, SRT, JSON, or plain text all work.
 

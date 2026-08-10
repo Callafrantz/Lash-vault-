@@ -71,7 +71,7 @@
           "evidence_tier": {
             "type": "string",
             "enum": ["peer_reviewed","regulatory","manufacturer_spec","controlled_test",
-                     "structured_experience","expert_assertion","anecdote","hearsay","marketing"]
+                     "deliberated_consensus","structured_experience","expert_assertion","anecdote","hearsay","marketing"]
           },
           "evidence_offered": {
             "type": ["string","null"],

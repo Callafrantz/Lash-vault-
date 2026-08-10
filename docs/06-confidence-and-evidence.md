@@ -24,6 +24,7 @@ Every claim is assigned exactly one tier. This is the strongest single input to 
 | T2 | Regulatory / standards body | 0.92 | Safety data sheets, board regulation, ISO |
 | T3 | Manufacturer technical specification | 0.85 | Adhesive TDS, fibre spec sheets |
 | T4 | Controlled practitioner testing | 0.75 | Documented side-by-side test, stated methodology, n reported |
+| T4b | Deliberated consensus | 0.68 | Multiple experienced practitioners debate a question on air and converge |
 | T5 | Structured practitioner experience | 0.60 | "Across ~2,000 clients over 6 years I consistently see…" |
 | T6 | Expert assertion | 0.50 | Credentialed educator states it without evidence |
 | T7 | Anecdote | 0.30 | "One client had this happen" |
@@ -33,6 +34,14 @@ Every claim is assigned exactly one tier. This is the strongest single input to 
 **Tier assignment is done at S2 by the extractor**, from `evidence_offered`, `sample_basis`,
 `is_reported_from_other` and `commercial_context`. It is not a judgement about the person —
 a world-class artist making an unevidenced assertion is T6, and that is correct.
+
+**On T4b.** A panel of experienced practitioners converging on an answer is genuinely stronger
+than any one of them asserting it, which is why it sits above expert assertion. It sits *below*
+controlled testing because it remains aggregated opinion, however senior the room. Critically,
+a consensus contributes **one** independent group, not one per participant — people in a live
+conversation influence each other, and counting five heads as five independent confirmations is
+the echo-chamber failure of §7 compressed into a single episode. See
+[`extract/deliberation.py`](../src/lashos_ke/extract/deliberation.py).
 
 ---
 

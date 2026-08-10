@@ -90,9 +90,14 @@ def test_evidence_tiers_consistent() -> None:
     from_json = set(_json("schemas/json/claim.schema.json")["properties"]["evidence_tier"]["enum"])
     from_sql = _sql_enum("evidence_tier_t")
 
+    from lashos_ke.extract.validators import VALID_EVIDENCE_TIERS
+
     assert from_json == from_sql, f"json/sql drift: {from_json ^ from_sql}"
     assert from_json == set(EVIDENCE_TIER_WEIGHT), (
         f"confidence.py drift: {from_json ^ set(EVIDENCE_TIER_WEIGHT)}"
+    )
+    assert from_json == VALID_EVIDENCE_TIERS, (
+        f"validators.py drift: {from_json ^ VALID_EVIDENCE_TIERS}"
     )
 
 
