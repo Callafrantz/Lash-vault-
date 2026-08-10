@@ -95,6 +95,7 @@ data/        Raw / interim / processed transcript storage (gitignored)
 | [10](docs/10-api-architecture.md) | API Architecture | Service boundaries and endpoints |
 | [11](docs/11-technology-stack.md) | Technology Stack | Every choice, with rationale |
 | [12](docs/12-implementation-plan.md) | Implementation Plan | Phased build, 0 → production |
+| [13](docs/13-week-one-pilot.md) | **Week One Pilot** | **Start here to build. Does claim extraction actually work?** |
 
 ---
 
