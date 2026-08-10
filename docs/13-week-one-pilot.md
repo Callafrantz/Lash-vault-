@@ -98,23 +98,63 @@ under the same person, they are **one** independent voice, and the pilot should 
 
 ## Step 3 — Run the pipeline
 
+**Install** (two packages; nothing else is needed for the pilot):
+
 ```bash
-uv sync
-export LKE_MODEL_API_KEY=...          # frontier model for S2
-lke pilot run --input data/raw --limit 10
+pip install anthropic pyyaml
 ```
 
-Writes `data/pilot/claims.jsonl` plus a human-readable audit sheet at
-`data/pilot/audit.md`.
+**Scaffold the manifest** from whatever is in `data/raw/`:
 
-Expect roughly 60 claims per hour of content — 10 transcripts of ~45 minutes each should
+```bash
+python -m lashos_ke.cli.main pilot init
+```
+
+Fill in `data/pilot/sources.yaml` (Step 2), then **check segmentation before spending
+anything** — a dry run makes no model calls and needs no key:
+
+```bash
+python -m lashos_ke.cli.main pilot run --dry-run
+```
+
+```
+[episode-04.vtt]
+  312 cues → 47 chunks (8214 words) · 29 salient (18 gated out)
+    [GATED] #0  sal=0.05   promo         210w  Welcome back, and a huge thank you to our sponsor...
+    [send ] #1  sal=0.64   explanation   288w  So the biggest thing nobody talks about is your room...
+```
+
+Read that output. If technical content is showing as `GATED`, or a sponsor read is
+merged into a real chunk, fix segmentation *before* paying for extraction — a recall
+problem created in S1 looks exactly like an extraction problem in the final score.
+
+**Then extract:**
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...       # or: ant auth login
+python -m lashos_ke.cli.main pilot run --limit 10
+```
+
+Writes `data/pilot/claims.jsonl` (machine-readable) and `data/pilot/audit.md` (your
+reading sheet), and prints a summary including token spend and approximate cost.
+
+**Useful flags:** `--effort medium` (cheaper, still strong), `--min-salience 0.2`
+(send more chunks if recall looks low), `--limit N`.
+
+Expect roughly 60 claims per hour of content — 10 transcripts of ~45 minutes should
 yield **400–500 claims**.
 
----
+> **What a model key is.** It's a password that lets this code talk to the model —
+> a long string starting `sk-ant-`. Create one at
+> [console.anthropic.com](https://console.anthropic.com) → API keys, and put it in
+> your shell as `ANTHROPIC_API_KEY`. It is billed per use, it is not a subscription,
+> and it is separate from any Claude app subscription. Treat it like a password:
+> never commit it, never paste it into a document. The pilot's 10 transcripts cost
+> a few dollars, and the run prints its own spend at the end.
 
 ## Step 4 — Read every claim (the actual work)
 
-Open `data/pilot/audit.md`. Every claim shows the verbatim quote, its timestamp, the
+Open `data/pilot/audit.md` in any editor. Every claim shows the verbatim quote, its timestamp, the
 normalised statement, and the annotations. For each one, mark a verdict:
 
 | Verdict | Meaning |
@@ -138,7 +178,7 @@ the failure most likely to survive into production unnoticed.
 ## Step 5 — Get the verdict
 
 ```bash
-lke pilot score data/pilot/audit.md
+python -m lashos_ke.cli.main pilot score
 ```
 
 ### Gates
