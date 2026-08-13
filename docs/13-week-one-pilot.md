@@ -98,23 +98,26 @@ under the same person, they are **one** independent voice, and the pilot should 
 
 ## Step 3 — Run the pipeline
 
-**Install** (two packages; nothing else is needed for the pilot):
+**Install** — needs Python 3.11+ and nothing else:
 
 ```bash
-pip install anthropic pyyaml
+git clone https://github.com/Callafrantz/Lash-vault-.git
+cd Lash-vault-
+pip install -e .          # gives you the `lke` command
+pip install anthropic     # the model SDK
 ```
 
 **Scaffold the manifest** from whatever is in `data/raw/`:
 
 ```bash
-python -m lashos_ke.cli.main pilot init
+lke pilot init
 ```
 
 Fill in `data/pilot/sources.yaml` (Step 2), then **check segmentation before spending
 anything** — a dry run makes no model calls and needs no key:
 
 ```bash
-python -m lashos_ke.cli.main pilot run --dry-run
+lke pilot run --dry-run
 ```
 
 ```
@@ -132,7 +135,7 @@ problem created in S1 looks exactly like an extraction problem in the final scor
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...       # or: ant auth login
-python -m lashos_ke.cli.main pilot run --limit 10
+lke pilot run --limit 10
 ```
 
 Writes `data/pilot/claims.jsonl` (machine-readable) and `data/pilot/audit.md` (your
@@ -151,6 +154,18 @@ yield **400–500 claims**.
 > and it is separate from any Claude app subscription. Treat it like a password:
 > never commit it, never paste it into a document. The pilot's 10 transcripts cost
 > a few dollars, and the run prints its own spend at the end.
+
+### Start with ONE transcript
+
+Do not run all ten first. Point it at a single transcript, read those ~40 claims, and
+you will know within half an hour whether extraction is fundamentally sound. If it is
+broken, you have saved yourself the other nine and the six hours of reading.
+
+```bash
+lke pilot run --limit 1
+```
+
+Scale to ten only once the first one looks right.
 
 ## Step 4 — Read every claim (the actual work)
 
@@ -178,7 +193,7 @@ the failure most likely to survive into production unnoticed.
 ## Step 5 — Get the verdict
 
 ```bash
-python -m lashos_ke.cli.main pilot score
+lke pilot score
 ```
 
 ### Gates

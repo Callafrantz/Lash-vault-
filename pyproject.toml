@@ -2,7 +2,9 @@
 name = "lashos-knowledge-engine"
 version = "0.1.0"
 description = "Knowledge extraction and knowledge graph engine for the lash industry — the foundation of LashOS."
-requires-python = ">=3.12"
+# 3.11 is the real floor (StrEnum). Requiring 3.12 would block the pilot on a stock
+# machine for no reason — the suite runs green on 3.11.
+requires-python = ">=3.11"
 license = { text = "Proprietary" }
 
 dependencies = [
@@ -61,13 +63,13 @@ packages = ["src/lashos_ke"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 strict = true
 # Strict typing is enforced where correctness is structural: the data model and
 # the shared core. Pipeline stages that marshal LLM output are checked less
