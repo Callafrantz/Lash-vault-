@@ -52,10 +52,10 @@ class TestSegmentation:
         assert all(c.word_count <= 700 for c in chunks)
 
     def test_breaks_on_speaker_change_once_the_chunk_can_stand_alone(self) -> None:
-        cues = self._cues(4, words=40, speaker="A") + self._cues(4, words=40, speaker="B")
+        cues = self._cues(6, words=40, speaker="A") + self._cues(6, words=40, speaker="B")
         chunks = segment(cues)
         assert len(chunks) >= 2
-        assert all(len(c.speakers) <= 1 for c in chunks), "160w per speaker should split"
+        assert all(len(c.speakers) <= 1 for c in chunks), "240w per speaker should split"
 
     def test_rapid_exchange_is_not_fragmented(self) -> None:
         """Breaking on every speaker change shatters a fast back-and-forth into
@@ -473,3 +473,41 @@ class TestPromoClassification:
             + " and don't forget to subscribe"
         )
         assert _segment_type(text) == "explanation"
+
+
+class TestAdVsClaimInALashPodcast:
+    """The hard case: in a lash podcast the advertisement is full of lash vocabulary
+    too ("my lash line", "our lash class"), so domain nouns cannot discriminate. The
+    signal that separates them is explanatory language — mechanism and measurement."""
+
+    def _t(self, text: str) -> str:
+        from lashos_ke.clean.segment import _segment_type
+
+        return _segment_type(text)
+
+    def test_closing_class_pitch_is_promo(self) -> None:
+        assert self._t(
+            "The class will help you really connect with your clients and grow your "
+            "lash business. Sign up at the link below, spots left are limited."
+        ) == "promo"
+
+    def test_product_launch_is_promo_despite_lash_words(self) -> None:
+        assert self._t(
+            "I'm going to have a whole lash line that's about to launch and you can "
+            "pre-order the bundle now, join us for the waitlist."
+        ) == "promo"
+
+    def test_mechanism_inside_a_class_mention_is_kept(self) -> None:
+        """An educator explaining chemistry while mentioning their class is teaching,
+        not advertising — gating it would lose the explanation."""
+        assert self._t(
+            "In our class we explain that the bond cures because moisture triggers "
+            "polymerisation, so the reaction finishes before you place the fan."
+        ) == "explanation"
+
+    def test_thesis_with_a_trailing_cta_is_kept(self) -> None:
+        assert self._t(
+            "In this episode we cover the biggest myth: that oil breaks down "
+            "cyanoacrylate adhesive. It does not, because once it cures the polymer "
+            "has nothing left to dissolve. Subscribe!"
+        ) == "explanation"

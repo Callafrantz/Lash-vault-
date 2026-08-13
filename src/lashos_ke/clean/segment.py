@@ -29,7 +29,7 @@ HARD_GAP_SECONDS = 25.0
 #: Below this, a short pause is not worth fragmenting the chunk over.
 MIN_WORDS_FOR_PAUSE_BREAK = 25
 #: A speaker change only ends a chunk once the chunk can stand on its own.
-MIN_WORDS_FOR_SPEAKER_BREAK = 120
+MIN_WORDS_FOR_SPEAKER_BREAK = 200
 MIN_SALIENCE = 0.30
 
 _FILLERS = re.compile(r"\b(?:um+|uh+|erm+|mm+hmm)\b[,\s]*", re.IGNORECASE)
@@ -42,7 +42,21 @@ _PRESERVED = ("i think", "maybe", "probably", "usually", "in my experience", "i 
 
 _PROMO = re.compile(
     r"\b(?:sponsor|sponsored by|discount code|use code|link in bio|giveaway|"
-    r"subscribe|like and follow|coupon|affiliate)\b",
+    r"subscribe|like and follow|coupon|affiliate|sign up|signup|enroll\w*|"
+    r"waitlist|spots? left|register now|link below|shop now|checkout|"
+    r"our (?:class|course|program)|the (?:class|course) will|join (?:us|the)|"
+    r"launch\w*|pre-?order|bundle|promo)\b",
+    re.IGNORECASE,
+)
+#: What actually separates a claim from an ad is NOT domain vocabulary — in a lash
+#: podcast the advertisement is full of lash words too ("my lash line", "our lash
+#: class"). The discriminator is explanatory language: mechanism, causation, and
+#: measured values.
+_TECHNICAL = re.compile(
+    r"\b(?:because|so that|which is why|that'?s why|the reason|causes?|caused|"
+    r"results? in|leads? to|due to|depends? on|happens when|"
+    r"polymer\w*|cures?|curing|cured|bonds?|bonding|molecul\w*|chemical\w*|"
+    r"reaction|evaporat\w*|absorb\w*|dissolv\w*)\b",
     re.IGNORECASE,
 )
 _ADMIN = re.compile(
@@ -129,21 +143,23 @@ PROMO_HITS_PER_100_WORDS = 1.2
 SHORT_CHUNK_WORDS = 150
 
 
-#: Technical density overrides any promotional signal: an advertisement does not
-#: explain cyanoacrylate polymerisation. Without this override, an episode opening
-#: that states the central claim AND says "subscribe" is classified as an ad and
-#: discarded whole.
-DOMAIN_HITS_OVERRIDE_PROMO = 4
+#: Explanatory signal needed to overrule a promotional one. Counting domain nouns does
+#: not work here: an advertisement inside a lash podcast says "lash" constantly. What an
+#: ad does NOT do is explain a mechanism or quote a measured value.
+MIN_TECHNICAL_TO_OVERRIDE_PROMO = 3
+
+#: Gating is a COST optimisation, not a correctness mechanism, and the two failure modes
+#: are not symmetric. Sending an advertisement costs a fraction of a cent and returns no
+#: claims — the extraction prompt already refuses promotional material. Gating a real
+#: claim loses it permanently and shows up later as an extraction failure that isn't one.
+#: Every threshold here is therefore biased toward sending.
 
 
 def _segment_type(text: str) -> str:
     words = max(1, len(text.split()))
     promo_hits = len(_PROMO.findall(text))
     admin_hits = len(_ADMIN.findall(text))
-    domain_hits = len(_DOMAIN.findall(text))
-
-    if domain_hits >= DOMAIN_HITS_OVERRIDE_PROMO and domain_hits > promo_hits:
-        return "explanation"
+    technical_hits = len(_TECHNICAL.findall(text)) + (2 if _NUMERIC.search(text) else 0)
 
     def dense(hits: int) -> bool:
         if hits == 0:
@@ -153,9 +169,11 @@ def _segment_type(text: str) -> str:
             return True
         return hits / (words / 100) >= PROMO_HITS_PER_100_WORDS
 
-    if dense(promo_hits):
+    explains = technical_hits >= MIN_TECHNICAL_TO_OVERRIDE_PROMO
+
+    if dense(promo_hits) and not explains:
         return "promo"
-    if dense(admin_hits) and promo_hits == 0 and domain_hits < 3:
+    if dense(admin_hits) and promo_hits == 0 and not explains:
         return "intro"
     return "explanation"
 
