@@ -7,39 +7,39 @@ description = "Knowledge extraction and knowledge graph engine for the lash indu
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
 
+# Base install is exactly what the week-one pilot (S0-S2 + audit) needs, and nothing
+# else. Listing the full production stack here made `pip install -e .` pull ~96
+# packages — Prefect, FastAPI, Postgres drivers, Docker — none of which the pilot
+# imports. The heavy stack lives in the `full` extra below and installs when the
+# database, orchestrator and API actually get built.
 dependencies = [
-    # core
+    "blake3>=0.4",      # content-addressed IDs — the only module-level third-party import
+    "anthropic>=0.60",  # model client (S2)
+    "pyyaml>=6.0",      # source manifest
+]
+
+[project.optional-dependencies]
+# Everything beyond the pilot: database, orchestration, API, vault export.
+full = [
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
     "typer>=0.12",
     "structlog>=24.4",
     "tenacity>=9.0",
-    "blake3>=0.4",
-
-    # data
     "sqlalchemy>=2.0",
     "alembic>=1.13",
     "psycopg[binary,pool]>=3.2",
     "pgvector>=0.3",
-
-    # pipeline
     "prefect>=3.0",
     "redis>=5.1",
-
-    # api
     "fastapi>=0.115",
     "uvicorn[standard]>=0.31",
-
-    # content
     "jinja2>=3.1",
-    "pyyaml>=6.0",
     "webvtt-py>=0.5",
     "python-frontmatter>=1.1",
     "rapidfuzz>=3.10",
     "jsonschema>=4.23",
 ]
-
-[project.optional-dependencies]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",

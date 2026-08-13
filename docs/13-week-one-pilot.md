@@ -105,7 +105,7 @@ git clone https://github.com/Callafrantz/Lash-vault-.git
 cd Lash-vault-
 
 python3 --version                        # must be 3.11 or higher
-python3 -m pip install -e . anthropic
+python3 -m pip install -e .          # ~20 packages, all the pilot needs
 ```
 
 **Use `python3 -m pip`, not bare `pip`.** On macOS `pip` is usually not on PATH, and
