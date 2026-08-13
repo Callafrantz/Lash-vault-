@@ -51,12 +51,35 @@ class TestSegmentation:
         assert len(chunks) > 1
         assert all(c.word_count <= 700 for c in chunks)
 
-    def test_breaks_on_speaker_change(self) -> None:
-        cues = self._cues(2, speaker="A") + self._cues(2, speaker="B")
+    def test_breaks_on_speaker_change_once_the_chunk_can_stand_alone(self) -> None:
+        cues = self._cues(4, words=40, speaker="A") + self._cues(4, words=40, speaker="B")
         chunks = segment(cues)
         assert len(chunks) >= 2
-        # No chunk may span two speakers — that would make attribution ambiguous.
-        assert all(len(c.speakers) <= 1 for c in chunks)
+        assert all(len(c.speakers) <= 1 for c in chunks), "160w per speaker should split"
+
+    def test_rapid_exchange_is_not_fragmented(self) -> None:
+        """Breaking on every speaker change shatters a fast back-and-forth into
+        two-word chunks, none of which can carry a claim."""
+        cues = []
+        for i in range(8):
+            cues.append(Cue(i * 3.0, i * 3.0 + 2.0, "yeah exactly right",
+                            speaker="A" if i % 2 == 0 else "B"))
+        chunks = segment(cues)
+        assert len(chunks) == 1, "short turns must accumulate, not fragment"
+
+    def test_multi_speaker_chunk_never_claims_a_single_speaker(self) -> None:
+        """The safety property: if a chunk spans speakers, `speaker` must be None so no
+        claim is silently attributed to the wrong person. The turn labels stay in the
+        text for the extractor to attribute per claim."""
+        cues = [
+            Cue(0.0, 3.0, "A: humidity matters a lot here", speaker="A"),
+            Cue(3.0, 6.0, "B: no i disagree completely", speaker="B"),
+        ]
+        chunks = segment(cues)
+        assert len(chunks) == 1
+        assert chunks[0].speaker is None
+        assert set(chunks[0].speakers) == {"A", "B"}
+        assert "A:" in chunks[0].raw_text and "B:" in chunks[0].raw_text
 
     def test_breaks_on_long_pause(self) -> None:
         cues = [
@@ -346,11 +369,107 @@ class TestNeighbourCarry:
         assert chunks[1].salience < 0.3, "unrelated chatter must not inherit across a gap"
 
     def test_promo_never_lifts_a_neighbour_or_gets_lifted(self) -> None:
+        # Separated by a hard gap so the sponsor read is its own chunk — a 2s gap is
+        # contiguous speech and correctly merges instead.
         cues = [
             Cue(0.0, 10.0, "use code LASH20 for a discount and subscribe, link in bio"),
-            Cue(12.0, 30.0,
+            Cue(200.0, 230.0,
                 "above sixty percent humidity the adhesive cures early and the lash bond "
                 "goes brittle which is why retention dies"),
         ]
         chunks = segment(cues)
+        assert len(chunks) == 2
+        assert chunks[0].segment_type == "promo"
         assert chunks[0].salience < 0.3, "promo must stay gated even beside strong content"
+        assert chunks[1].salience >= 0.3
+
+
+class TestMarkdownPodcastTranscripts:
+    """Exported podcast transcripts label turns inline as `**Speaker 1:**`. A
+    line-start-only pattern finds none of them, so the whole conversation arrives
+    unattributed and segmentation cannot break on speaker — which silently defeats
+    the deliberation modelling that depends on knowing who said what."""
+
+    SAMPLE = """# 188. Oil Has No Impact On Lash Glues
+
+Welcome back! Thanks to our sponsor, and don't forget to subscribe.
+
+**Speaker 1:** The thing everyone gets wrong is they think oil dissolves the glue.
+Cyanoacrylate is a polymer once it cures, so the oil has nothing to dissolve.
+
+**Speaker 2:** And that's what bonds at that point. If you're above sixty percent
+humidity your adhesive is curing before it touches the lash.
+
+**Speaker 1:** Right.
+
+**Speaker 2:** Use code LASH20 for a discount, link in bio, and subscribe.
+"""
+
+    def test_bold_turn_labels_are_parsed(self) -> None:
+        from lashos_ke.ingest.parsers import parse_txt
+
+        cues = parse_txt(self.SAMPLE)
+        speakers = {c.speaker for c in cues if c.speaker}
+        assert speakers == {"Speaker 1", "Speaker 2"}, f"got {speakers}"
+
+    def test_preamble_before_first_turn_is_kept(self) -> None:
+        from lashos_ke.ingest.parsers import parse_txt
+
+        cues = parse_txt(self.SAMPLE)
+        assert "Oil Has No Impact" in cues[0].text
+
+    def test_turn_labels_survive_into_the_text(self) -> None:
+        """A chunk may span several turns, so the extractor needs the inline labels
+        to attribute each claim to the right speaker."""
+        from lashos_ke.ingest.parsers import parse_txt
+
+        cues = parse_txt(self.SAMPLE)
+        assert any(c.text.startswith("Speaker 1:") for c in cues)
+
+    def test_plain_colon_labels_still_work(self) -> None:
+        from lashos_ke.ingest.parsers import parse_txt
+
+        cues = parse_txt(
+            "Jane: humidity matters here\nBob: I disagree with that\nJane: well look\n"
+        )
+        assert {c.speaker for c in cues} == {"Jane", "Bob"}
+
+    def test_stray_colons_are_not_mistaken_for_speakers(self) -> None:
+        from lashos_ke.ingest.parsers import parse_txt
+
+        cues = parse_txt("Note: this is prose.\n\nIt continues normally here.\n")
+        assert all(c.speaker is None for c in cues)
+
+
+class TestPromoClassification:
+    """An episode opening that states the central claim AND says "subscribe" must not
+    be discarded as an advertisement — that is how the most important claim in a
+    transcript gets silently dropped."""
+
+    def test_technical_content_overrides_a_promo_mention(self) -> None:
+        from lashos_ke.clean.segment import _segment_type
+
+        text = (
+            "In this episode we cover the biggest myth: that oil breaks down "
+            "cyanoacrylate adhesive. It does not. Oil has no measurable impact on the "
+            "cured lash adhesive bond. What kills retention is the cure. Subscribe!"
+        )
+        assert _segment_type(text) == "explanation"
+
+    def test_pure_sponsor_read_is_still_promo(self) -> None:
+        from lashos_ke.clean.segment import _segment_type
+
+        text = (
+            "And the nice thing is they'll pay more for it. Use code LASH20 for a "
+            "discount, link in bio, and subscribe for next week's episode."
+        )
+        assert _segment_type(text) == "promo"
+
+    def test_one_sponsor_mention_in_a_long_technical_block(self) -> None:
+        from lashos_ke.clean.segment import _segment_type
+
+        text = (
+            "adhesive humidity retention cure bond lash isolation viscosity " * 40
+            + " and don't forget to subscribe"
+        )
+        assert _segment_type(text) == "explanation"

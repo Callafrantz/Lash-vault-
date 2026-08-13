@@ -92,10 +92,18 @@ class TestTXT:
         assert len(cues) == 2
         assert all(c.t_start is None for c in cues)
 
-    def test_extracts_speaker_prefix(self) -> None:
+    def test_extracts_speaker_prefix_when_the_doc_is_turn_labelled(self) -> None:
+        cues = parse_txt(
+            "Jane: humidity matters a lot\nBob: I disagree\nJane: look at the data\n"
+        )
+        assert {c.speaker for c in cues} == {"Jane", "Bob"}
+
+    def test_single_colon_prefix_is_not_treated_as_a_speaker(self) -> None:
+        """One "Word:" is ambiguous — "Note:", "Warning:", "Example:" all match that
+        shape. A wrong attribution puts a claim in someone's mouth under their name,
+        which is worse than no attribution at all."""
         cues = parse_txt("Jane: humidity matters a lot")
-        assert cues[0].speaker == "Jane"
-        assert cues[0].text == "humidity matters a lot"
+        assert cues[0].speaker is None
 
     def test_collapses_internal_whitespace(self) -> None:
         assert parse_txt("a   b\nc") == [Cue(None, None, "a b c", None)]

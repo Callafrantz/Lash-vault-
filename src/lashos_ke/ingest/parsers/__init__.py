@@ -143,19 +143,60 @@ def parse_json(content: str) -> list[Cue]:
     return cues
 
 
+#: Markdown-bold turn labels, the dominant format in exported podcast transcripts:
+#: `**Speaker 1:** ...`, `**Jane Doe:** ...`. These appear INLINE, several per
+#: paragraph, so a line-start-only pattern finds none of them and the whole
+#: conversation collapses into unattributed prose.
+_BOLD_TURN = re.compile(r"\*\*\s*([^*:\n]{1,40}?)\s*:\s*\*\*\s*")
+#: Plain turn labels at the start of a line: `Speaker 1: ...`
+_PLAIN_TURN = re.compile(r"(?:^|\n)[ \t]*([A-Z][\w .'-]{0,30}):[ \t]+")
+#: Below this many labels, a match is more likely a false positive ("Note:", "Warning:")
+#: than a real turn-labelled transcript.
+_MIN_TURN_LABELS = 3
+
+
+def _split_turns(content: str, pattern: re.Pattern[str]) -> list[Cue]:
+    """Split a document into one cue per speaker turn."""
+    cues: list[Cue] = []
+    matches = list(pattern.finditer(content))
+    for i, match in enumerate(matches):
+        speaker = match.group(1).strip()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+        text = " ".join(content[match.end() : end].split())
+        if text:
+            # Keep the label in the text: a chunk may span several turns, and the
+            # extractor needs the inline labels to attribute each claim correctly.
+            cues.append(Cue(None, None, f"{speaker}: {text}", speaker))
+    return cues
+
+
 def parse_txt(content: str) -> list[Cue]:
-    """Plain text: no timestamps. Paragraphs become untimed cues.
+    """Plain text and markdown: no timestamps.
+
+    Turn-labelled transcripts are split per speaker turn; otherwise paragraphs become
+    untimed cues.
 
     Sources parsed this way get `has_timestamps: false`, which costs them reliability
     score — deep-linkable attribution is part of what makes a claim trustworthy.
     """
-    cues: list[Cue] = []
+    for pattern in (_BOLD_TURN, _PLAIN_TURN):
+        if len(pattern.findall(content)) >= _MIN_TURN_LABELS:
+            preamble = content[: pattern.search(content).start()].strip()  # type: ignore[union-attr]
+            cues = _split_turns(content, pattern)
+            if preamble:
+                # Title / show notes before the first turn — kept so nothing is lost.
+                cues.insert(0, Cue(None, None, " ".join(preamble.split()), None))
+            return cues
+
+    # No turn-label pattern reached the threshold, so this is prose. Do NOT guess a
+    # speaker from a leading "Word:" here — "Note:", "Warning:", "Example:" all match
+    # that shape, and a wrong attribution is worse than none: it would put a claim in
+    # someone's mouth, with their name on it, in the audit sheet.
+    cues = []
     for para in re.split(r"\n\s*\n", content.strip()):
         text = " ".join(para.split())
-        if not text:
-            continue
-        speaker, text = _extract_speaker(text)
-        cues.append(Cue(None, None, text, speaker))
+        if text:
+            cues.append(Cue(None, None, text, None))
     return cues
 
 

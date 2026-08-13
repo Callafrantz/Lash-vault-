@@ -28,6 +28,8 @@ PAUSE_BREAK_SECONDS = 2.5
 HARD_GAP_SECONDS = 25.0
 #: Below this, a short pause is not worth fragmenting the chunk over.
 MIN_WORDS_FOR_PAUSE_BREAK = 25
+#: A speaker change only ends a chunk once the chunk can stand on its own.
+MIN_WORDS_FOR_SPEAKER_BREAK = 120
 MIN_SALIENCE = 0.30
 
 _FILLERS = re.compile(r"\b(?:um+|uh+|erm+|mm+hmm)\b[,\s]*", re.IGNORECASE)
@@ -55,7 +57,8 @@ _DOMAIN = re.compile(
     r"classic|mega|extension|extensions|cure|curing|bond|shed\w*|fill|removal|"
     r"diameter|mapping|primer|cleanser|allerg\w*|irritat\w*|client|natural|"
     r"hygrometer|humidifier|dehumidifier|tweezer\w*|aftercare|patch test|sensitiv\w*|"
-    r"lift|tint|brow|pretreat\w*|bonder|sealant|eye pad|mapping|stickies)\b",
+    r"lift|tint|brow|pretreat\w*|bonder|sealant|eye pad|stickies|cyanoacrylate|"
+    r"polymer\w*|viscosity|dry time|set time|sebum|oily|oil)\b",
     re.IGNORECASE,
 )
 #: Chunks that continue a topic anaphorically ("she was losing everything by day four")
@@ -117,10 +120,42 @@ def clean_text(raw: str) -> str:
     return text[:1].upper() + text[1:] if text else text
 
 
+#: A single "subscribe" in a 600-word block does not make the block an advertisement.
+#: Classification is by density, not by any-match: a long chunk that mentions a sponsor
+#: once while explaining adhesive chemistry is explanation with an aside, and gating it
+#: as promo discards the technical content with it — which is how an episode's central
+#: claim, stated in the opening, gets silently dropped.
+PROMO_HITS_PER_100_WORDS = 1.2
+SHORT_CHUNK_WORDS = 150
+
+
+#: Technical density overrides any promotional signal: an advertisement does not
+#: explain cyanoacrylate polymerisation. Without this override, an episode opening
+#: that states the central claim AND says "subscribe" is classified as an ad and
+#: discarded whole.
+DOMAIN_HITS_OVERRIDE_PROMO = 4
+
+
 def _segment_type(text: str) -> str:
-    if _PROMO.search(text):
+    words = max(1, len(text.split()))
+    promo_hits = len(_PROMO.findall(text))
+    admin_hits = len(_ADMIN.findall(text))
+    domain_hits = len(_DOMAIN.findall(text))
+
+    if domain_hits >= DOMAIN_HITS_OVERRIDE_PROMO and domain_hits > promo_hits:
+        return "explanation"
+
+    def dense(hits: int) -> bool:
+        if hits == 0:
+            return False
+        # Short chunks are usually pure: one sponsor mention in 80 words is an ad.
+        if words <= SHORT_CHUNK_WORDS:
+            return True
+        return hits / (words / 100) >= PROMO_HITS_PER_100_WORDS
+
+    if dense(promo_hits):
         return "promo"
-    if _ADMIN.search(text):
+    if dense(admin_hits) and promo_hits == 0 and domain_hits < 3:
         return "intro"
     return "explanation"
 
@@ -204,10 +239,17 @@ def segment(
     for cue in cues:
         if buffer:
             prev = buffer[-1]
+            # Breaking on EVERY speaker change shatters a fast back-and-forth into
+            # two-word chunks ("Yeah." / "Right." / "So anyway..."), each too small to
+            # carry a claim. Break only once the buffer holds enough to stand alone;
+            # otherwise keep accumulating and record every speaker present. Turn labels
+            # stay in the text, so the extractor can still attribute each claim.
+            buffered_words = sum(len(c.text.split()) for c in buffer)
             speaker_changed = (
                 cue.speaker is not None
                 and prev.speaker is not None
                 and cue.speaker != prev.speaker
+                and buffered_words >= MIN_WORDS_FOR_SPEAKER_BREAK
             )
             gap_seconds = (
                 cue.t_start - prev.t_end

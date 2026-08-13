@@ -98,7 +98,17 @@ def _render_user(template: str, chunk: Chunk, meta: dict[str, Any]) -> str:
         "creator_name": meta.get("creator", "Unknown"),
         "platform": meta.get("platform", "unknown"),
         "published_at": meta.get("published_at", "unknown"),
-        "speaker_name": chunk.speaker or meta.get("creator", "Unknown"),
+        "speaker_name": (
+            chunk.speaker
+            or (
+                # Multi-speaker chunk: naming one speaker would misattribute roughly
+                # half the claims. Tell the extractor to use the inline turn labels.
+                f"MULTIPLE — {', '.join(chunk.speakers)}. Attribute each claim using "
+                f"the inline turn labels in the text below."
+                if len(chunk.speakers) > 1
+                else meta.get("creator", "Unknown")
+            )
+        ),
         "chunk_sequence": chunk.sequence,
         "t_start": chunk.t_start if chunk.t_start is not None else "n/a",
         "t_end": chunk.t_end if chunk.t_end is not None else "n/a",
