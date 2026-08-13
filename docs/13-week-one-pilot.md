@@ -18,9 +18,9 @@ need adjusting — it needs rethinking. That is why this runs before anything el
 | --- | --- | --- |
 | Select 10 transcripts | **You** | Requires knowing which content contains contested claims |
 | Score creators | **You** | Requires knowing who is actually credible |
-| Run S0→S2 | Code | `lke pilot run` |
+| Run S0→S2 | Code | `pilot run` |
 | Read every claim | **You** | The whole point — nobody else can judge fidelity |
-| Compute the verdict | Code | `lke pilot score` |
+| Compute the verdict | Code | `pilot score` |
 
 The parts that need you are the parts that need lash expertise. Budget **6–8 hours of your
 own reading time.** That is the real cost of this week, and it is unavoidable — an automated
@@ -103,21 +103,32 @@ under the same person, they are **one** independent voice, and the pilot should 
 ```bash
 git clone https://github.com/Callafrantz/Lash-vault-.git
 cd Lash-vault-
-pip install -e .          # gives you the `lke` command
-pip install anthropic     # the model SDK
+
+python3 --version                        # must be 3.11 or higher
+python3 -m pip install -e . anthropic
 ```
+
+**Use `python3 -m pip`, not bare `pip`.** On macOS `pip` is usually not on PATH, and
+neither is the `lke` command an editable install creates. Every command below therefore
+uses the module form, which always works:
+
+```bash
+python3 -m lashos_ke.cli.main pilot --help
+```
+
+If `lke` happens to work on your machine, it is the same thing and shorter.
 
 **Scaffold the manifest** from whatever is in `data/raw/`:
 
 ```bash
-lke pilot init
+python3 -m lashos_ke.cli.main pilot init
 ```
 
 Fill in `data/pilot/sources.yaml` (Step 2), then **check segmentation before spending
 anything** — a dry run makes no model calls and needs no key:
 
 ```bash
-lke pilot run --dry-run
+python3 -m lashos_ke.cli.main pilot run --dry-run
 ```
 
 ```
@@ -135,7 +146,7 @@ problem created in S1 looks exactly like an extraction problem in the final scor
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...       # or: ant auth login
-lke pilot run --limit 10
+python3 -m lashos_ke.cli.main pilot run --limit 10
 ```
 
 Writes `data/pilot/claims.jsonl` (machine-readable) and `data/pilot/audit.md` (your
@@ -162,7 +173,7 @@ you will know within half an hour whether extraction is fundamentally sound. If 
 broken, you have saved yourself the other nine and the six hours of reading.
 
 ```bash
-lke pilot run --limit 1
+python3 -m lashos_ke.cli.main pilot run --limit 1
 ```
 
 Scale to ten only once the first one looks right.
@@ -193,7 +204,7 @@ the failure most likely to survive into production unnoticed.
 ## Step 5 — Get the verdict
 
 ```bash
-lke pilot score
+python3 -m lashos_ke.cli.main pilot score
 ```
 
 ### Gates

@@ -52,12 +52,23 @@ class LLMResult:
 
     @property
     def cost_usd(self) -> float:
-        """Approximate list-price cost. Indicative only — re-derive from a real pilot."""
+        """Approximate list-price cost for the model that actually served the request.
+
+        Priced per model rather than assuming the default: reporting Opus rates for a
+        Haiku run overstates spend ~5x, which would push a cost-conscious operator away
+        from the cheap option for no reason.
+        """
+        rates = PRICING.get(_price_key(self.model))
+        if rates is None:
+            # Unknown model: price at the ceiling. Over-estimating is the safe direction
+            # for a budget guard — under-estimating is how a surprise bill happens.
+            rates = max(PRICING.values(), key=lambda r: r[1])
+        price_in, price_out = rates
         return (
-            self.input_tokens * 5.0
-            + self.cache_read_tokens * 0.5
-            + self.cache_write_tokens * 6.25
-            + self.output_tokens * 25.0
+            self.input_tokens * price_in
+            + self.cache_read_tokens * price_in * CACHE_READ_MULTIPLIER
+            + self.cache_write_tokens * price_in * CACHE_WRITE_MULTIPLIER
+            + self.output_tokens * price_out
         ) / 1_000_000
 
 
