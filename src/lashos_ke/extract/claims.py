@@ -235,6 +235,21 @@ def extract_from_chunk(
     return kept
 
 
+#: Request IDs differ on every call, so they must be stripped before two error messages
+#: can be compared for sameness.
+_VOLATILE = re.compile(r"req_[A-Za-z0-9]+")
+
+#: How many identical failures in a row before the run gives up. A deterministic
+#: rejection — a malformed schema, an unsupported parameter — fails the same way on
+#: every chunk, and grinding through the rest only reproduces one error many times.
+#: Three is enough to rule out coincidence and cheap enough to absorb.
+MAX_CONSECUTIVE_IDENTICAL_FAILURES = 3
+
+
+def _error_signature(message: str | None) -> str:
+    return _VOLATILE.sub("req_*", message or "")
+
+
 def extract_source(
     client: StructuredClient,
     chunks: Iterable[Chunk],
@@ -250,11 +265,16 @@ def extract_source(
     system, user_template = load_prompt()
 
     claims: list[ExtractedClaim] = []
+    repeat_signature: str | None = None
+    repeat_count = 0
+
     for chunk in chunks:
         stats.chunks_total += 1
         if chunk.salience < min_salience:
             stats.chunks_skipped_salience += 1
             continue
+
+        failures_before = stats.chunks_failed
         try:
             claims.extend(
                 extract_from_chunk(
@@ -279,4 +299,22 @@ def extract_source(
             stats.stopped_reason = str(exc)
             stats.last_error = str(exc)
             break
+
+        # Catch-all for deterministic failures the status code does not reveal — an
+        # invalid schema comes back as a plain 400 and would otherwise consume the
+        # whole transcript reproducing the same rejection.
+        if stats.chunks_failed > failures_before:
+            signature = _error_signature(stats.last_error)
+            repeat_count = repeat_count + 1 if signature == repeat_signature else 1
+            repeat_signature = signature
+            if repeat_count >= MAX_CONSECUTIVE_IDENTICAL_FAILURES:
+                stats.stopped_reason = (
+                    f"{repeat_count} consecutive identical failures — "
+                    f"this will not resolve by continuing: {stats.last_error}"
+                )
+                break
+        else:
+            repeat_signature = None
+            repeat_count = 0
+
     return claims, stats

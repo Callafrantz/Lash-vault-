@@ -162,6 +162,52 @@ class TestStructuredOutputSchema:
         assert "causal" in claim["claim_type"]["enum"]
         assert "deliberated_consensus" in claim["evidence_tier"]["enum"]
 
+    def test_no_enum_sits_beside_a_union_type(self, transformed: dict) -> None:
+        """The API rejects the whole request with:
+
+            Enum value 'conversational' does not match declared type '['string','null']'
+
+        It validates enum members against a scalar type and does not unpack a union.
+        Every chunk fails, so this is a total run failure, not a degraded one — and it
+        is invisible until a real call is made. Guarded across the entire schema
+        because a new nullable enum would reintroduce it silently.
+        """
+        offenders: list[str] = []
+
+        def walk(node: object, path: str = "$") -> None:
+            if isinstance(node, dict):
+                if "enum" in node and isinstance(node.get("type"), list):
+                    offenders.append(path)
+                for k, v in node.items():
+                    walk(v, f"{path}.{k}")
+            elif isinstance(node, list):
+                for i, v in enumerate(node):
+                    walk(v, f"{path}[{i}]")
+
+        walk(transformed)
+        assert not offenders, f"enum beside a union type: {offenders}"
+
+    def test_nullable_enum_keeps_null_as_a_legal_value(self, transformed: dict) -> None:
+        """Dropping the union must not quietly make an optional field mandatory —
+        every property is emitted as required, so null has to stay legal."""
+        assert None in transformed["properties"]["no_claims_reason"]["enum"]
+        claim = transformed["properties"]["claims"]["items"]["properties"]
+        assert None in claim["suggested_domain"]["enum"]
+        assert None in claim["evidence_offered"]["enum"]
+
+    def test_null_is_added_when_the_union_declared_it_but_the_enum_did_not(self) -> None:
+        out = to_structured_output_schema(
+            {"type": ["string", "null"], "enum": ["a", "b"]}
+        )
+        assert out["enum"] == ["a", "b", None]
+        assert "type" not in out
+
+    def test_scalar_typed_enums_are_left_alone(self, transformed: dict) -> None:
+        """These already work. The narrowest possible fix is the right one."""
+        claim = transformed["properties"]["claims"]["items"]["properties"]
+        assert claim["claim_type"]["type"] == "string"
+        assert claim["evidence_tier"]["type"] == "string"
+
     def test_untyped_nodes_get_a_type(self, transformed: dict) -> None:
         param = (
             transformed["properties"]["claims"]["items"]["properties"]["parameters"]

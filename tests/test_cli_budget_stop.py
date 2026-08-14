@@ -13,7 +13,11 @@ import json
 import pytest
 
 from lashos_ke.core.llm import BudgetExceeded, FatalLLMError, LLMError, LLMResult
-from lashos_ke.extract.claims import ExtractionStats, extract_source
+from lashos_ke.extract.claims import (
+    MAX_CONSECUTIVE_IDENTICAL_FAILURES,
+    ExtractionStats,
+    extract_source,
+)
 
 TRANSCRIPT_CHUNK_TEXT = (
     "so the biggest thing that nobody talks about is your room if you're above "
@@ -164,17 +168,103 @@ class TestFatalErrorsStopImmediately:
         _, _, stats = self._run(FatalLLMError("model not found (HTTP 404)"))
         assert not stats.budget_exceeded
 
-    def test_transient_errors_still_quarantine_per_chunk(self) -> None:
-        """Only repeat-identically failures abort. A single malformed response must
-        not take the whole run down with it."""
-        client, _, stats = self._run(LLMError("unparseable output after 2 attempts"))
-        assert client.calls == 6
-        assert stats.chunks_failed == 6
-
     def test_transient_failures_record_the_error(self) -> None:
         _, _, stats = self._run(LLMError("unparseable output after 2 attempts"))
         assert stats.last_error is not None
         assert "unparseable" in stats.last_error
+
+
+class TestRepeatedIdenticalFailuresAbort:
+    """An invalid output schema returns a plain 400 — no status code marks it as
+    permanent — and it failed all 18 chunks of a real transcript identically. The
+    status-based guard cannot catch that, so sameness itself is the signal."""
+
+    def _run(self, exc: Exception, chunks: int = 10):
+        client = _FailingClient(exc)
+        claims, stats = extract_source(
+            client,  # type: ignore[arg-type]
+            [_Chunk(i) for i in range(chunks)],
+            source_id="src_yt_202403_a3f9c1d2",
+            meta={},
+            stats=ExtractionStats(),
+        )
+        return client, claims, stats
+
+    def test_gives_up_after_three_identical_failures(self) -> None:
+        client, _, stats = self._run(LLMError("Error code: 400 - Invalid schema"))
+        assert client.calls == MAX_CONSECUTIVE_IDENTICAL_FAILURES
+        assert stats.stopped_reason is not None
+        assert "consecutive identical failures" in stats.stopped_reason
+
+    def test_volatile_request_ids_do_not_defeat_the_comparison(self) -> None:
+        """Every response carries a fresh request_id. Comparing raw messages would
+        make each failure look unique and never trip the guard."""
+
+        class _VaryingClient(_FailingClient):
+            def structured(self, **_: object):
+                self.calls += 1
+                raise LLMError(
+                    "model call failed: Error code: 400 - Invalid schema, "
+                    f"'request_id': 'req_011Ce2EsLSrX9Bax{self.calls:04d}'"
+                )
+
+        client = _VaryingClient(LLMError("unused"))
+        _, stats = extract_source(
+            client,  # type: ignore[arg-type]
+            [_Chunk(i) for i in range(10)],
+            source_id="src_yt_202403_a3f9c1d2",
+            meta={},
+            stats=ExtractionStats(),
+        )
+        assert client.calls == MAX_CONSECUTIVE_IDENTICAL_FAILURES
+        assert stats.stopped_reason is not None
+
+    def test_scattered_distinct_failures_do_not_abort(self) -> None:
+        """Genuinely different errors are the normal quarantine case — the run should
+        push through them and report at the end."""
+
+        class _DifferentEachTime(_FailingClient):
+            def structured(self, **_: object):
+                self.calls += 1
+                raise LLMError(f"distinct failure number {self.calls}")
+
+        client = _DifferentEachTime(LLMError("unused"))
+        _, stats = extract_source(
+            client,  # type: ignore[arg-type]
+            [_Chunk(i) for i in range(10)],
+            source_id="src_yt_202403_a3f9c1d2",
+            meta={},
+            stats=ExtractionStats(),
+        )
+        assert client.calls == 10
+        assert stats.stopped_reason is None
+        assert stats.chunks_failed == 10
+
+    def test_a_success_resets_the_streak(self) -> None:
+        """Two failures, a success, two more failures is a flaky run, not a broken
+        one — it must not be mistaken for a deterministic rejection."""
+
+        class _FlakyClient(_FakeClient):
+            attempts = 0
+
+            def structured(self, **kw: object):
+                self.attempts += 1
+                if self.attempts in (1, 2, 4, 5):
+                    raise LLMError("Error code: 529 - overloaded")
+                return _FakeClient.structured(self, **kw)  # type: ignore[arg-type]
+
+        client = _FlakyClient(allowed_calls=99)
+        claims, stats = extract_source(
+            client,  # type: ignore[arg-type]
+            [_Chunk(i) for i in range(6)],
+            source_id="src_yt_202403_a3f9c1d2",
+            meta={},
+            stats=ExtractionStats(),
+        )
+        assert client.attempts == 6, "all six chunks attempted; no early abort"
+        assert stats.stopped_reason is None
+        assert stats.chunks_failed == 4
+        assert len(claims) == 2
 
     def test_a_wholly_failed_run_is_distinguishable_from_an_empty_one(self) -> None:
         """The exact confusion to prevent: zero claims for two opposite reasons."""

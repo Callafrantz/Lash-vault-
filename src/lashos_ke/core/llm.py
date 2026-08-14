@@ -166,6 +166,19 @@ def to_structured_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
         else:
             out[key] = value
 
+    # An `enum` beside a union `type` is rejected outright:
+    #   "Enum value 'conversational' does not match declared type '['string','null']'"
+    # The engine validates each member against a scalar type and does not unpack the
+    # union. `enum` is the stricter constraint anyway — it already fixes the exact set
+    # of legal values, `null` included — so the union is redundant and gets dropped.
+    # A scalar `type` alongside an enum is accepted, so those nodes are left alone.
+    if "enum" in out and isinstance(out.get("type"), list):
+        nullable = "null" in out["type"]
+        del out["type"]
+        # Nullability lived in the type union for this node; keep it expressible.
+        if nullable and None not in out["enum"]:
+            out["enum"] = [*out["enum"], None]
+
     if out.get("type") == "object":
         out["additionalProperties"] = False
         # Every declared property must be required; optionality is expressed by
