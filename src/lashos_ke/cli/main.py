@@ -21,7 +21,7 @@ from lashos_ke.clean.segment import segment
 from lashos_ke.core import ids
 from lashos_ke.evals.audit import score_pilot
 from lashos_ke.evals.sheet import parse_sheet, render_sheet
-from lashos_ke.extract.claims import ExtractionStats, extract_source
+from lashos_ke.extract.claims import ChunkProgress, ExtractionStats, extract_source
 from lashos_ke.ingest.parsers import parse
 
 DEFAULT_INPUT = Path("data/raw")
@@ -92,6 +92,64 @@ def cmd_init(args: argparse.Namespace) -> int:
 # ── run ───────────────────────────────────────────────────────────────────
 
 
+def _fmt_duration(seconds: float) -> str:
+    if seconds < 10:
+        return f"{seconds:.1f}s"
+    if seconds < 90:
+        return f"{seconds:.0f}s"
+    return f"{seconds / 60:.0f} min"
+
+
+class _ProgressPrinter:
+    """Renders extraction progress to the terminal, one line per chunk.
+
+    The line is written on `start` and overwritten in place on `done`, so a chunk in
+    flight is visible rather than inferred from silence. The running cost and the
+    estimated time remaining are the two facts that answer "is this working, and how
+    long do I wait" — the question whose absence caused a healthy run to be killed.
+    """
+
+    def __init__(self, client: Any, stream: Any | None = None) -> None:
+        self._client = client
+        self._out = stream if stream is not None else sys.stdout
+        # Redrawing in place only makes sense on a terminal. Piped to a file or a log,
+        # a carriage return is literal noise, so there the in-flight line is skipped
+        # and each chunk prints once when it completes.
+        self._live = bool(getattr(self._out, "isatty", lambda: False)())
+        self._cost_at_start = 0.0
+        self._elapsed_total = 0.0
+
+    def __call__(self, p: ChunkProgress) -> None:
+        head = f"    #{p.sequence:<3} {p.words:>4}w"
+        if p.phase == "start":
+            self._cost_at_start = self._client.total.cost_usd
+            if self._live:
+                print(f"{head}  ·  sending…", end="", flush=True, file=self._out)
+            return
+
+        self._elapsed_total += p.elapsed_s
+        spent = self._client.total.cost_usd
+        remaining = p.total - p.index
+        tail = f"({p.index}/{p.total} · ${spent:.2f}"
+        if remaining:
+            # Mean of the calls so far — chunk durations vary enough that the last
+            # call alone would swing the estimate wildly.
+            tail += f" · ~{_fmt_duration((self._elapsed_total / p.index) * remaining)} left"
+        tail += ")"
+
+        line = (
+            f"{head}  ·  {p.claims_kept:>2} claims  "
+            f"{_fmt_duration(p.elapsed_s):>6}  "
+            f"${spent - self._cost_at_start:.3f}   {tail}"
+        )
+        # Pad to erase the longer "sending…" text left on the line.
+        print(
+            f"\r{line:<78}" if self._live else line,
+            flush=True,
+            file=self._out,
+        )
+
+
 def _credential_error(status: str, source: str) -> str:
     """Actionable message for a run that has no usable credential.
 
@@ -151,6 +209,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         if status is not CredentialStatus.OK:
             print(_credential_error(status, source), file=sys.stderr)
             return 2
+        # Say which credential resolved. Otherwise "is my key set?" stays a question
+        # answered by guesswork, and a shell test that disagrees with the run sends
+        # you looking in the wrong place.
+        print(
+            "Using stored ant auth login profile."
+            if source == "stored profile"
+            else f"Using API key from {source}."
+        )
 
         try:
             client = StructuredClient(
@@ -171,105 +237,122 @@ def cmd_run(args: argparse.Namespace) -> int:
     totals = ExtractionStats()
     stop_reason: str | None = None
 
-    for path in transcripts:
-        rel = str(path.relative_to(root))
-        meta = manifest.get(rel, {})
-        print(f"\n[{path.name}]")
+    # An interrupt must not discard transcripts already extracted — they were
+    # paid for. extract_source handles Ctrl-C during the model calls, which is
+    # where the time goes; this covers the gaps between and around them.
+    try:
+        for path in transcripts:
+            rel = str(path.relative_to(root))
+            meta = manifest.get(rel, {})
+            print(f"\n[{path.name}]")
 
-        try:
-            cues = parse(path)
-        except Exception as exc:
-            print(f"  skipped — could not parse: {exc}")
-            continue
+            try:
+                cues = parse(path)
+            except Exception as exc:
+                print(f"  skipped — could not parse: {exc}")
+                continue
 
-        chunks = segment(cues)
-        salient = [c for c in chunks if c.salience >= args.min_salience]
-        words = sum(c.word_count for c in chunks)
-        print(
-            f"  {len(cues)} cues → {len(chunks)} chunks ({words} words) · "
-            f"{len(salient)} salient ({len(chunks) - len(salient)} gated out)"
-        )
+            chunks = segment(cues)
+            salient = [c for c in chunks if c.salience >= args.min_salience]
+            words = sum(c.word_count for c in chunks)
+            print(
+                f"  {len(cues)} cues → {len(chunks)} chunks ({words} words) · "
+                f"{len(salient)} salient ({len(chunks) - len(salient)} gated out)"
+            )
 
-        content = " ".join(c.raw_text for c in chunks)
-        chash = ids.content_hash(content)
-        published = str(meta.get("published_at", date.today().isoformat()))
-        yyyymm = published.replace("-", "")[:6] if len(published) >= 7 else "000000"
-        source_id = ids.source_id(str(meta.get("platform", "other")), yyyymm, chash)
+            content = " ".join(c.raw_text for c in chunks)
+            chash = ids.content_hash(content)
+            published = str(meta.get("published_at", date.today().isoformat()))
+            yyyymm = published.replace("-", "")[:6] if len(published) >= 7 else "000000"
+            source_id = ids.source_id(str(meta.get("platform", "other")), yyyymm, chash)
 
-        if args.dry_run or client is None:
-            for c in chunks:
-                gate = "send " if c.salience >= args.min_salience else "GATED"
+            if args.dry_run or client is None:
+                for c in chunks:
+                    gate = "send " if c.salience >= args.min_salience else "GATED"
+                    print(
+                        f"    [{gate}] #{c.sequence} sal={c.salience:<6} {c.segment_type:<12} "
+                        f"{c.word_count:>4}w  {c.text[:58]}"
+                    )
+                continue
+
+            claims, stats = extract_source(
+                client,
+                chunks,
+                source_id=source_id,
+                meta=meta,
+                min_salience=args.min_salience,
+                on_progress=_ProgressPrinter(client),
+            )
+            verbatim_note = ""
+            if stats.verbatim_failures:
+                verbatim_note = f" · {stats.verbatim_failures} VERBATIM FAILURES"
+                if stats.paraphrase_failures:
+                    verbatim_note += (
+                        f" ({stats.paraphrase_failures} paraphrase, "
+                        f"{stats.fabrication_failures} not found)"
+                    )
+            print(
+                f"  {stats.claims_returned} returned · {stats.claims_kept} kept · "
+                f"{stats.claims_discarded} discarded" + verbatim_note
+            )
+            if stats.chunks_failed:
                 print(
-                    f"    [{gate}] #{c.sequence} sal={c.salience:<6} {c.segment_type:<12} "
-                    f"{c.word_count:>4}w  {c.text[:58]}"
+                    f"  {stats.chunks_failed} of {stats.chunks_total} chunks FAILED "
+                    f"— last error: {stats.last_error}"
                 )
-            continue
 
-        claims, stats = extract_source(
-            client,
-            chunks,
-            source_id=source_id,
-            meta=meta,
-            min_salience=args.min_salience,
-        )
-        verbatim_note = ""
-        if stats.verbatim_failures:
-            verbatim_note = f" · {stats.verbatim_failures} VERBATIM FAILURES"
-            if stats.paraphrase_failures:
-                verbatim_note += (
-                    f" ({stats.paraphrase_failures} paraphrase, "
-                    f"{stats.fabrication_failures} not found)"
-                )
-        print(
-            f"  {stats.claims_returned} returned · {stats.claims_kept} kept · "
-            f"{stats.claims_discarded} discarded" + verbatim_note
-        )
-        if stats.chunks_failed:
-            print(
-                f"  {stats.chunks_failed} of {stats.chunks_total} chunks FAILED "
-                f"— last error: {stats.last_error}"
+            for field_name in (
+                "chunks_total", "chunks_sent", "chunks_skipped_salience", "chunks_failed",
+                "claims_returned", "claims_kept", "claims_discarded", "refusals",
+            ):
+                setattr(totals, field_name, getattr(totals, field_name) + getattr(stats, field_name))
+            if stats.last_error:
+                totals.last_error = stats.last_error
+            for code, n in stats.discard_reasons.items():
+                totals.discard_reasons[code] = totals.discard_reasons.get(code, 0) + n
+            for code, n in stats.flag_reasons.items():
+                totals.flag_reasons[code] = totals.flag_reasons.get(code, 0) + n
+
+            rows = [c.to_dict() for c in claims]
+            all_claims.extend(rows)
+            sheet_sources.append(
+                {
+                    "source_id": source_id,
+                    "meta": {**meta, "title": meta.get("title") or path.stem},
+                    "claims": rows,
+                    "verbatim_failures": stats.verbatim_failures,
+                    "paraphrase_failures": stats.paraphrase_failures,
+                }
             )
 
-        for field_name in (
-            "chunks_total", "chunks_sent", "chunks_skipped_salience", "chunks_failed",
-            "claims_returned", "claims_kept", "claims_discarded", "refusals",
-        ):
-            setattr(totals, field_name, getattr(totals, field_name) + getattr(stats, field_name))
-        if stats.last_error:
-            totals.last_error = stats.last_error
-        for code, n in stats.discard_reasons.items():
-            totals.discard_reasons[code] = totals.discard_reasons.get(code, 0) + n
-        for code, n in stats.flag_reasons.items():
-            totals.flag_reasons[code] = totals.flag_reasons.get(code, 0) + n
+            if stats.budget_exceeded:
+                print(
+                    f"\n  STOPPED — spend ceiling of ${args.max_spend:.2f} reached while "
+                    f"extracting {path.name}."
+                )
+                print("  Everything extracted so far is still written below.")
+                print("  Raise it with --max-spend, or re-run with --limit to do less.")
+                stop_reason = stats.stopped_reason
+                break
+            if stats.interrupted:
+                print(f"\n  INTERRUPTED — {stats.stopped_reason}.")
+                print(
+                    f"  {stats.claims_kept} claims were extracted before that and are "
+                    "written below."
+                )
+                stop_reason = stats.stopped_reason
+                break
+            if stats.stopped_reason:
+                # Not a budget stop: something that will fail identically on every
+                # remaining chunk. Continuing would burn the corpus to reproduce one error.
+                print(f"\n  STOPPED — {stats.stopped_reason}")
+                print(f"  Nothing further was attempted after {path.name}.")
+                stop_reason = stats.stopped_reason
+                break
 
-        rows = [c.to_dict() for c in claims]
-        all_claims.extend(rows)
-        sheet_sources.append(
-            {
-                "source_id": source_id,
-                "meta": {**meta, "title": meta.get("title") or path.stem},
-                "claims": rows,
-                "verbatim_failures": stats.verbatim_failures,
-                "paraphrase_failures": stats.paraphrase_failures,
-            }
-        )
-
-        if stats.budget_exceeded:
-            print(
-                f"\n  STOPPED — spend ceiling of ${args.max_spend:.2f} reached while "
-                f"extracting {path.name}."
-            )
-            print("  Everything extracted so far is still written below.")
-            print("  Raise it with --max-spend, or re-run with --limit to do less.")
-            stop_reason = stats.stopped_reason
-            break
-        if stats.stopped_reason:
-            # Not a budget stop: something that will fail identically on every
-            # remaining chunk. Continuing would burn the corpus to reproduce one error.
-            print(f"\n  STOPPED — {stats.stopped_reason}")
-            print(f"  Nothing further was attempted after {path.name}.")
-            stop_reason = stats.stopped_reason
-            break
+    except KeyboardInterrupt:
+        stop_reason = "interrupted by the operator"
+        print("\n  INTERRUPTED — writing everything extracted so far.")
 
     if args.dry_run:
         print("\nDry run complete — segmentation only. Re-run without --dry-run to extract.")

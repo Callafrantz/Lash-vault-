@@ -152,6 +152,23 @@ python3 -m lashos_ke.cli.main pilot run --limit 10
 Writes `data/pilot/claims.jsonl` (machine-readable) and `data/pilot/audit.md` (your
 reading sheet), and prints a summary including token spend and approximate cost.
 
+**Extraction is slow, and that is normal.** Each chunk is one model call with thinking
+on — 30 to 90 seconds. A 45-minute transcript is ~18 chunks, so **budget 10–25 minutes
+per transcript**. You will see a line per chunk as it completes:
+
+```
+Using API key from ANTHROPIC_API_KEY.
+
+[episode-04.vtt]
+  312 cues → 47 chunks (8214 words) · 29 salient (18 gated out)
+    #1    288w  ·   6 claims     41s  $0.019   (1/29 · $0.02 · ~19 min left)
+    #3    264w  ·   4 claims     37s  $0.017   (2/29 · $0.04 · ~17 min left)
+```
+
+If those lines are appearing, it is working — do not kill it. **Ctrl-C is safe if you
+do need to stop**: everything extracted up to that point is still written to
+`claims.jsonl` and `audit.md`, and only the in-flight chunk is lost.
+
 **Useful flags:** `--effort medium` (cheaper, still strong), `--min-salience 0.2`
 (send more chunks if recall looks low), `--limit N`, `--max-spend N`.
 

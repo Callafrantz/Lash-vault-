@@ -15,6 +15,7 @@ import pytest
 from lashos_ke.core.llm import BudgetExceeded, FatalLLMError, LLMError, LLMResult
 from lashos_ke.extract.claims import (
     MAX_CONSECUTIVE_IDENTICAL_FAILURES,
+    ChunkProgress,
     ExtractionStats,
     extract_source,
 )
@@ -301,6 +302,132 @@ class TestFatalStatusMapping:
 
         assert 429 not in _FATAL_STATUSES
         assert 500 not in _FATAL_STATUSES
+
+
+class TestProgressReporting:
+    """S2 is minutes of silent sequential calls. Without per-chunk reporting a healthy
+    run is indistinguishable from a wedged one — which is how a working run got killed
+    at chunk 17 of 18."""
+
+    def _run(self, chunks: int = 6, min_salience: float = 0.30, chunk_list=None):  # type: ignore[no-untyped-def]
+        events: list[ChunkProgress] = []
+        client = _FakeClient(allowed_calls=99)
+        extract_source(
+            client,  # type: ignore[arg-type]
+            chunk_list if chunk_list is not None else [_Chunk(i) for i in range(chunks)],
+            source_id="src_yt_202403_a3f9c1d2",
+            meta={},
+            min_salience=min_salience,
+            on_progress=events.append,
+        )
+        return events
+
+    def test_fires_start_and_done_for_every_sent_chunk(self) -> None:
+        events = self._run(chunks=6)
+        assert [e.phase for e in events] == ["start", "done"] * 6
+
+    def test_index_counts_up_and_total_is_fixed(self) -> None:
+        starts = [e for e in self._run(chunks=6) if e.phase == "start"]
+        assert [e.index for e in starts] == [1, 2, 3, 4, 5, 6]
+        assert {e.total for e in starts} == {6}
+
+    def test_total_counts_only_chunks_that_will_be_sent(self) -> None:
+        """The denominator must match what is actually sent. Counting gated chunks
+        would make the time estimate — the number that decides whether someone waits
+        or gives up — wrong from the first line."""
+        chunks = [_Chunk(i) for i in range(4)]
+        for c in chunks[:3]:
+            c.salience = 0.1
+        events = self._run(chunk_list=chunks)
+        assert len(events) == 2  # one start, one done
+        assert events[0].total == 1
+
+    def test_done_carries_the_claims_kept_for_that_chunk(self) -> None:
+        done = [e for e in self._run(chunks=3) if e.phase == "done"]
+        assert [e.claims_kept for e in done] == [1, 1, 1]
+
+    def test_done_carries_a_non_negative_elapsed_time(self) -> None:
+        done = [e for e in self._run(chunks=2) if e.phase == "done"]
+        assert all(e.elapsed_s >= 0.0 for e in done)
+
+    def test_events_identify_the_chunk(self) -> None:
+        """`sequence` is what lets a progress line be matched against --dry-run."""
+        starts = [e for e in self._run(chunks=3) if e.phase == "start"]
+        assert [e.sequence for e in starts] == [0, 1, 2]
+        assert all(e.words > 0 for e in starts)
+
+    def test_omitting_the_callback_changes_nothing(self) -> None:
+        client = _FakeClient(allowed_calls=99)
+        claims, stats = extract_source(
+            client,  # type: ignore[arg-type]
+            [_Chunk(i) for i in range(4)],
+            source_id="src_yt_202403_a3f9c1d2",
+            meta={},
+        )
+        assert len(claims) == 4
+        assert stats.chunks_sent == 4
+
+    def test_a_generator_of_chunks_still_works(self) -> None:
+        """extract_source materialises its input to count the total up front — a
+        generator must not come back empty."""
+        client = _FakeClient(allowed_calls=99)
+        claims, _ = extract_source(
+            client,  # type: ignore[arg-type]
+            (_Chunk(i) for i in range(3)),
+            source_id="src_yt_202403_a3f9c1d2",
+            meta={},
+        )
+        assert len(claims) == 3
+
+
+class TestInterruptKeepsWork:
+    """Ctrl-C on a slow run must not discard chunks already paid for."""
+
+    class _InterruptingClient(_FakeClient):
+        def __init__(self, interrupt_on: int) -> None:
+            super().__init__(allowed_calls=99)
+            self.interrupt_on = interrupt_on
+
+        def structured(self, **kw: object) -> LLMResult:
+            if self.calls >= self.interrupt_on:
+                raise KeyboardInterrupt
+            return super().structured(**kw)  # type: ignore[arg-type]
+
+    def _run(self, interrupt_on: int, chunks: int = 6):  # type: ignore[no-untyped-def]
+        client = self._InterruptingClient(interrupt_on)
+        return extract_source(
+            client,  # type: ignore[arg-type]
+            [_Chunk(i) for i in range(chunks)],
+            source_id="src_yt_202403_a3f9c1d2",
+            meta={},
+        )
+
+    def test_claims_before_the_interrupt_are_returned(self) -> None:
+        claims, _ = self._run(interrupt_on=3)
+        assert len(claims) == 3
+
+    def test_run_is_flagged_as_interrupted(self) -> None:
+        _, stats = self._run(interrupt_on=3)
+        assert stats.interrupted
+        assert stats.stopped_reason is not None
+        assert "interrupted" in stats.stopped_reason
+
+    def test_interrupt_is_not_a_failure(self) -> None:
+        """It must not be counted as a broken chunk or a budget stop — the operator
+        chose to stop, and the summary should say that rather than imply an error."""
+        _, stats = self._run(interrupt_on=3)
+        assert stats.chunks_failed == 0
+        assert not stats.budget_exceeded
+
+    def test_partial_claims_are_serialisable(self) -> None:
+        claims, _ = self._run(interrupt_on=2)
+        rows = [c.to_dict() for c in claims]
+        assert json.loads(json.dumps(rows))[0]["claim_type"] == "causal"
+
+    def test_interrupt_on_the_first_chunk_returns_cleanly(self) -> None:
+        claims, stats = self._run(interrupt_on=0)
+        assert claims == []
+        assert stats.interrupted
 
 
 class TestSalienceGateIsFreeOfCost:

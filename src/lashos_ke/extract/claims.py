@@ -8,7 +8,8 @@ the provenance guarantee real — see extract/validators.py.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -25,13 +26,44 @@ from lashos_ke.core.llm import (
 )
 from lashos_ke.extract.validators import Severity, validate_claim
 
-__all__ = ["ExtractedClaim", "ExtractionStats", "extract_from_chunk", "extract_source"]
+__all__ = [
+    "ChunkProgress",
+    "ExtractedClaim",
+    "ExtractionStats",
+    "extract_from_chunk",
+    "extract_source",
+]
 
 PROMPT_VERSION = "claim-extract@2.3"
 _PROMPT_PATH = (
     Path(__file__).resolve().parents[1] / "prompts" / "claim_extract" / "v2.3.md"
 )
 _FRONTMATTER = re.compile(r"^---\n.*?\n---\n", re.S)
+
+
+@dataclass(slots=True)
+class ChunkProgress:
+    """One step of an extraction run, reported as it happens.
+
+    S2 is minutes of sequential model calls with no natural output. Without this a
+    healthy run and a wedged one look identical from the terminal, which is how a
+    working run gets killed at chunk 17 of 18.
+    """
+
+    index: int
+    """1-based position among the chunks actually being sent."""
+    total: int
+    """How many will be sent — the salience-gated count, not the chunk count."""
+    sequence: int
+    """chunk.sequence, so a line can be matched against --dry-run output."""
+    words: int
+    phase: str
+    """`start` before the call, `done` after."""
+    claims_kept: int = 0
+    elapsed_s: float = 0.0
+
+
+ProgressFn = Callable[[ChunkProgress], None]
 
 
 @dataclass(slots=True)
@@ -79,8 +111,11 @@ class ExtractionStats:
     """The run hit its spend ceiling and stopped early. Whatever was extracted before
     that point is still valid and still written."""
     stopped_reason: str | None = None
-    """Why the run aborted early, if it did — a spend ceiling or an error that would
-    repeat on every remaining chunk."""
+    """Why the run aborted early, if it did — a spend ceiling, an error that would
+    repeat on every remaining chunk, or the operator interrupting."""
+    interrupted: bool = False
+    """The operator pressed Ctrl-C. Distinct from a failure: what was extracted before
+    that point is valid and still written."""
     last_error: str | None = None
     """The most recent call failure. Without this a failed run is indistinguishable
     from a transcript that genuinely contained no claims."""
@@ -258,22 +293,48 @@ def extract_source(
     meta: dict[str, Any],
     min_salience: float = 0.30,
     stats: ExtractionStats | None = None,
+    on_progress: ProgressFn | None = None,
 ) -> tuple[list[ExtractedClaim], ExtractionStats]:
-    """Run S2 across one source's chunks."""
+    """Run S2 across one source's chunks.
+
+    `on_progress` reports each chunk as it is sent and as it returns. This module never
+    prints — presentation belongs to the caller.
+    """
     stats = stats or ExtractionStats()
     schema = load_schema("extraction_output.schema.json")
     system, user_template = load_prompt()
 
+    # Materialised because the total has to be known before the first chunk is sent —
+    # a progress count that discovers its own denominator as it goes cannot estimate
+    # anything. Chunk lists are one transcript's worth, so this is cheap.
+    all_chunks = list(chunks)
+    to_send = sum(1 for c in all_chunks if c.salience >= min_salience)
+
     claims: list[ExtractedClaim] = []
     repeat_signature: str | None = None
     repeat_count = 0
+    sent_index = 0
 
-    for chunk in chunks:
+    for chunk in all_chunks:
         stats.chunks_total += 1
         if chunk.salience < min_salience:
             stats.chunks_skipped_salience += 1
             continue
 
+        sent_index += 1
+        if on_progress is not None:
+            on_progress(
+                ChunkProgress(
+                    index=sent_index,
+                    total=to_send,
+                    sequence=chunk.sequence,
+                    words=chunk.word_count,
+                    phase="start",
+                )
+            )
+
+        started = time.monotonic()
+        kept_before = stats.claims_kept
         failures_before = stats.chunks_failed
         try:
             claims.extend(
@@ -299,6 +360,28 @@ def extract_source(
             stats.stopped_reason = str(exc)
             stats.last_error = str(exc)
             break
+        except KeyboardInterrupt:
+            # Caught here rather than left to unwind: `claims` is local to this
+            # function, so letting the interrupt propagate would throw away every
+            # chunk already paid for. Only the in-flight chunk is lost.
+            stats.interrupted = True
+            stats.stopped_reason = (
+                f"interrupted after chunk {sent_index - 1} of {to_send}"
+            )
+            break
+
+        if on_progress is not None:
+            on_progress(
+                ChunkProgress(
+                    index=sent_index,
+                    total=to_send,
+                    sequence=chunk.sequence,
+                    words=chunk.word_count,
+                    phase="done",
+                    claims_kept=stats.claims_kept - kept_before,
+                    elapsed_s=time.monotonic() - started,
+                )
+            )
 
         # Catch-all for deterministic failures the status code does not reveal — an
         # invalid schema comes back as a plain 400 and would otherwise consume the

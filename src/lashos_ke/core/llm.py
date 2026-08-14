@@ -174,9 +174,17 @@ def _profile_dir() -> Path:
 
 
 def has_stored_profile() -> bool:
-    """True if `ant auth login` left a profile the SDK can resolve without an env var."""
+    """True if `ant auth login` left a profile the SDK can actually resolve.
+
+    A profile is two files — `configs/<name>.json` and `credentials/<name>.json` — and
+    the SDK errors if either is missing. Checking only for credentials would let this
+    report a usable credential and then fail at request time, which is precisely the
+    confusion the pre-flight check exists to remove.
+    """
+    base = _profile_dir()
     try:
-        return any((_profile_dir() / "credentials").glob("*.json"))
+        names = {p.stem for p in (base / "configs").glob("*.json")}
+        return any((base / "credentials" / f"{n}.json").exists() for n in names)
     except OSError:  # pragma: no cover - permissions vary
         return False
 
