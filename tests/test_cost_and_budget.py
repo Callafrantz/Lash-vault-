@@ -11,10 +11,12 @@ import pytest
 
 from lashos_ke.core.llm import (
     CACHE_READ_MULTIPLIER,
+    DEFAULT_MODEL,
     PRICING,
     BudgetExceeded,
     LLMResult,
     _price_key,
+    supports_effort,
 )
 
 
@@ -72,6 +74,38 @@ class TestPricing:
 
     def test_zero_usage_is_free(self) -> None:
         assert _result("claude-opus-5").cost_usd == 0.0
+
+
+class TestEffortSupport:
+    """`output_config.effort` is not universal. Sending it to a model that rejects it
+    is a 400 on every chunk — a whole transcript lost to one unsupported flag:
+
+        This model does not support the effort parameter.
+    """
+
+    def test_the_default_model_supports_effort(self) -> None:
+        assert supports_effort(DEFAULT_MODEL)
+
+    @pytest.mark.parametrize(
+        "model",
+        ["claude-opus-5", "claude-opus-4-8", "claude-sonnet-5", "claude-sonnet-4-6"],
+    )
+    def test_supported_models(self, model: str) -> None:
+        assert supports_effort(model)
+
+    @pytest.mark.parametrize("model", ["claude-haiku-4-5", "claude-sonnet-4-5"])
+    def test_models_that_reject_effort(self, model: str) -> None:
+        """Haiku 4.5 is the one that bit — it is the obvious cheap-pass choice."""
+        assert not supports_effort(model)
+
+    def test_dated_snapshot_of_a_rejecting_model_still_rejects(self) -> None:
+        assert not supports_effort("claude-haiku-4-5-20251001")
+
+    def test_unknown_model_is_treated_as_unsupported(self) -> None:
+        """Omitting effort costs reasoning depth; sending it to a model that refuses
+        costs the entire run. Omission is the recoverable direction."""
+        assert not supports_effort("some-unreleased-model")
+        assert not supports_effort("")
 
 
 class _StubClient:

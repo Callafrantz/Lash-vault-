@@ -208,18 +208,22 @@ you will know within half an hour whether extraction is fundamentally sound. If 
 broken, you have saved yourself the other nine and the six hours of reading.
 
 ```bash
-# Cheap first pass — shakes out format and plumbing problems for pennies.
-python3 -m lashos_ke.cli.main pilot run --limit 1 --model claude-haiku-4-5
-
-# Then the same transcript on the strong model, for the real quality read.
 python3 -m lashos_ke.cli.main pilot run --limit 1
 ```
 
-Both runs together cost under fifty cents. The first tells you whether the *pipeline*
-works; only the second tells you whether *extraction* works, so do not judge the
-architecture on the Haiku pass.
+That is roughly forty cents on Opus 5 and is the run whose output is worth reading
+properly. Scale to ten only once the first one looks right.
 
-Scale to ten only once the first one looks right.
+A cheaper smoke test is available if you only want to check the plumbing:
+
+```bash
+python3 -m lashos_ke.cli.main pilot run --limit 1 --model claude-haiku-4-5   # ~$0.08
+```
+
+**`--effort` does not apply to Haiku 4.5 or Sonnet 4.5** — those models reject the
+parameter outright, so the run omits it and prints a note. Reasoning depth is then the
+model's own default. Do not judge extraction quality on that pass; it tells you the
+pipeline works, not that the architecture does.
 
 ## Step 4 — Read every claim (the actual work)
 

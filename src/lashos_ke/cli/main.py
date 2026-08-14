@@ -109,7 +109,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not args.dry_run:
         import os
 
-        from lashos_ke.core.llm import LLMError, StructuredClient
+        from lashos_ke.core.llm import LLMError, StructuredClient, supports_effort
 
         # Catch the copy-pasted placeholder before spending a round trip on it. A real
         # key never contains an ellipsis, and the resulting 401 arrives 18 chunks later
@@ -133,6 +133,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         except LLMError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
+
+        if not supports_effort(args.model):
+            print(
+                f"note: {args.model} does not support --effort; it runs at the model's "
+                "default reasoning depth."
+            )
 
     sheet_sources: list[dict[str, Any]] = []
     all_claims: list[dict[str, Any]] = []

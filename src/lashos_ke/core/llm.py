@@ -22,6 +22,7 @@ __all__ = [
     "RefusalError",
     "BudgetExceeded",
     "FatalLLMError",
+    "supports_effort",
     "StructuredClient",
     "to_structured_output_schema",
 ]
@@ -31,7 +32,29 @@ DEFAULT_MODEL = "claude-opus-5"
 #: Thinking is ON by default on this model and counts against max_tokens, so the ceiling
 #: must leave room for reasoning *plus* the JSON payload. A tight limit truncates
 #: mid-object and the parse fails for a reason that looks like a model error.
-DEFAULT_MAX_TOKENS = 8000
+#: 16k is the practical ceiling for non-streaming requests — higher risks an HTTP
+#: timeout before the response completes.
+DEFAULT_MAX_TOKENS = 16000
+
+#: Model families that accept `output_config.effort`. Sending it to anything else is a
+#: hard 400 that fails every chunk identically:
+#:   "This model does not support the effort parameter."
+#: Haiku 4.5 and Sonnet 4.5 are the ones that bite — both are otherwise reasonable
+#: cheap-pass choices, so the flag has to degrade rather than break the run.
+_EFFORT_SUPPORTED = (
+    "claude-opus-4-5",
+    "claude-opus-4-6",
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-opus-5",
+    "claude-sonnet-4-6",
+    "claude-sonnet-5",
+    "claude-fable-5",
+)
+
+
+def supports_effort(model: str) -> bool:
+    return (model or "").strip().lower().startswith(_EFFORT_SUPPORTED)
 
 #: USD per million tokens: (input, output). List prices, not contractual — this drives
 #: the run's cost display and the spend guard, both of which want an estimate that errs
@@ -258,6 +281,15 @@ class StructuredClient:
         warnings: list[str] = []
         last_error: Exception | None = None
 
+        output_config: dict[str, Any] = {
+            "format": {"type": "json_schema", "schema": api_schema}
+        }
+        if supports_effort(self.model):
+            output_config["effort"] = self.effort
+        elif self.effort != "high":
+            # Silently dropping a flag the operator set would misreport what ran.
+            warnings.append(f"{self.model} ignores --effort; running at its default")
+
         for attempt in (1, 2):
             try:
                 response = self._client.messages.create(
@@ -273,10 +305,7 @@ class StructuredClient:
                         }
                     ],
                     messages=[{"role": "user", "content": user}],
-                    output_config={
-                        "format": {"type": "json_schema", "schema": api_schema},
-                        "effort": self.effort,
-                    },
+                    output_config=output_config,
                 )
             except Exception as exc:  # SDK already retried transient failures
                 status = getattr(exc, "status_code", None)
