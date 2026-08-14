@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from lashos_ke.core.llm import BudgetExceeded, LLMResult
+from lashos_ke.core.llm import BudgetExceeded, FatalLLMError, LLMError, LLMResult
 from lashos_ke.extract.claims import ExtractionStats, extract_source
 
 TRANSCRIPT_CHUNK_TEXT = (
@@ -117,6 +117,100 @@ class TestBudgetStopKeepsWork:
         assert claims == []
         assert stats.budget_exceeded
         assert stats.chunks_failed == 0
+
+
+class _FailingClient:
+    """Always fails with the given exception."""
+
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+        self.calls = 0
+        self.total = LLMResult(data={}, model="claude-opus-5")
+
+    def structured(self, **_: object) -> LLMResult:
+        self.calls += 1
+        raise self.exc
+
+
+class TestFatalErrorsStopImmediately:
+    """The failure that produced a clean, empty, uninterpretable run.
+
+    An invalid API key returns 401 on every call. Quarantining each chunk burned all
+    18, reported "0 returned · 0 kept · 0 discarded", and never mentioned that any
+    call had failed — indistinguishable from a transcript containing nothing.
+    """
+
+    def _run(self, exc: Exception, chunks: int = 6):
+        client = _FailingClient(exc)
+        claims, stats = extract_source(
+            client,  # type: ignore[arg-type]
+            [_Chunk(i) for i in range(chunks)],
+            source_id="src_yt_202403_a3f9c1d2",
+            meta={},
+            stats=ExtractionStats(),
+        )
+        return client, claims, stats
+
+    def test_bad_key_stops_after_one_call(self) -> None:
+        client, _, _ = self._run(FatalLLMError("authentication failed (HTTP 401)"))
+        assert client.calls == 1, "must not retry a bad key against every chunk"
+
+    def test_stop_reason_is_recorded(self) -> None:
+        _, _, stats = self._run(FatalLLMError("authentication failed (HTTP 401)"))
+        assert stats.stopped_reason is not None
+        assert "authentication failed" in stats.stopped_reason
+
+    def test_fatal_stop_is_not_reported_as_a_budget_stop(self) -> None:
+        _, _, stats = self._run(FatalLLMError("model not found (HTTP 404)"))
+        assert not stats.budget_exceeded
+
+    def test_transient_errors_still_quarantine_per_chunk(self) -> None:
+        """Only repeat-identically failures abort. A single malformed response must
+        not take the whole run down with it."""
+        client, _, stats = self._run(LLMError("unparseable output after 2 attempts"))
+        assert client.calls == 6
+        assert stats.chunks_failed == 6
+
+    def test_transient_failures_record_the_error(self) -> None:
+        _, _, stats = self._run(LLMError("unparseable output after 2 attempts"))
+        assert stats.last_error is not None
+        assert "unparseable" in stats.last_error
+
+    def test_a_wholly_failed_run_is_distinguishable_from_an_empty_one(self) -> None:
+        """The exact confusion to prevent: zero claims for two opposite reasons."""
+        _, claims, failed = self._run(LLMError("boom"))
+        assert claims == []
+        assert failed.chunks_failed > 0 and failed.last_error
+
+        ok_client = _FakeClient(allowed_calls=99)
+        empty: list = []
+        _, empty_stats = extract_source(
+            ok_client,  # type: ignore[arg-type]
+            empty,
+            source_id="src_yt_202403_a3f9c1d2",
+            meta={},
+            stats=ExtractionStats(),
+        )
+        assert empty_stats.chunks_failed == 0
+        assert empty_stats.last_error is None
+
+
+class TestFatalStatusMapping:
+    def test_auth_permission_and_model_errors_are_fatal(self) -> None:
+        from lashos_ke.core.llm import _FATAL_STATUSES
+
+        assert set(_FATAL_STATUSES) == {401, 403, 404}
+
+    def test_fatal_is_an_llm_error(self) -> None:
+        assert issubclass(FatalLLMError, LLMError)
+
+    def test_rate_limits_and_server_errors_are_not_fatal(self) -> None:
+        """429 and 5xx are transient — the SDK already retried them, and one bad
+        moment should not abandon the corpus."""
+        from lashos_ke.core.llm import _FATAL_STATUSES
+
+        assert 429 not in _FATAL_STATUSES
+        assert 500 not in _FATAL_STATUSES
 
 
 class TestSalienceGateIsFreeOfCost:

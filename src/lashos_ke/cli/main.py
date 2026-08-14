@@ -107,7 +107,24 @@ def cmd_run(args: argparse.Namespace) -> int:
     # segmentation before spending anything.
     client = None
     if not args.dry_run:
+        import os
+
         from lashos_ke.core.llm import LLMError, StructuredClient
+
+        # Catch the copy-pasted placeholder before spending a round trip on it. A real
+        # key never contains an ellipsis, and the resulting 401 arrives 18 chunks later
+        # looking like an empty transcript.
+        key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if "..." in key:
+            print(
+                "error: ANTHROPIC_API_KEY is still the placeholder "
+                f"({key!r}).\n"
+                "       Create a real key at https://console.anthropic.com → API keys, "
+                "then:\n"
+                "       export ANTHROPIC_API_KEY=sk-ant-<your-actual-key>",
+                file=sys.stderr,
+            )
+            return 2
 
         try:
             client = StructuredClient(
@@ -120,6 +137,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     sheet_sources: list[dict[str, Any]] = []
     all_claims: list[dict[str, Any]] = []
     totals = ExtractionStats()
+    stop_reason: str | None = None
 
     for path in transcripts:
         rel = str(path.relative_to(root))
@@ -174,12 +192,19 @@ def cmd_run(args: argparse.Namespace) -> int:
             f"  {stats.claims_returned} returned · {stats.claims_kept} kept · "
             f"{stats.claims_discarded} discarded" + verbatim_note
         )
+        if stats.chunks_failed:
+            print(
+                f"  {stats.chunks_failed} of {stats.chunks_total} chunks FAILED "
+                f"— last error: {stats.last_error}"
+            )
 
         for field_name in (
             "chunks_total", "chunks_sent", "chunks_skipped_salience", "chunks_failed",
             "claims_returned", "claims_kept", "claims_discarded", "refusals",
         ):
             setattr(totals, field_name, getattr(totals, field_name) + getattr(stats, field_name))
+        if stats.last_error:
+            totals.last_error = stats.last_error
         for code, n in stats.discard_reasons.items():
             totals.discard_reasons[code] = totals.discard_reasons.get(code, 0) + n
         for code, n in stats.flag_reasons.items():
@@ -204,6 +229,14 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
             print("  Everything extracted so far is still written below.")
             print("  Raise it with --max-spend, or re-run with --limit to do less.")
+            stop_reason = stats.stopped_reason
+            break
+        if stats.stopped_reason:
+            # Not a budget stop: something that will fail identically on every
+            # remaining chunk. Continuing would burn the corpus to reproduce one error.
+            print(f"\n  STOPPED — {stats.stopped_reason}")
+            print(f"  Nothing further was attempted after {path.name}.")
+            stop_reason = stats.stopped_reason
             break
 
     if args.dry_run:
@@ -218,6 +251,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     print("\n" + "=" * 60)
     print(f"claims        {totals.claims_kept} kept / {totals.claims_returned} returned")
     print(f"chunks        {totals.chunks_sent} sent / {totals.chunks_total} total")
+    if totals.chunks_failed:
+        print(f"FAILED        {totals.chunks_failed} chunks — see the error above")
+    if totals.refusals:
+        print(f"refusals      {totals.refusals}")
     if totals.verbatim_failures:
         print(
             f"VERBATIM      {totals.verbatim_failures} failures "
@@ -237,6 +274,21 @@ def cmd_run(args: argparse.Namespace) -> int:
         )
     print("=" * 60)
     print(f"\nWrote {claims_path} and {sheet_path}")
+
+    # A run that extracted nothing is a failure, not a finding — say so and exit
+    # non-zero rather than inviting a review of an empty sheet.
+    if not all_claims:
+        print("\nNO CLAIMS EXTRACTED.", file=sys.stderr)
+        if stop_reason or totals.last_error:
+            print(f"Cause: {stop_reason or totals.last_error}", file=sys.stderr)
+        elif totals.chunks_sent:
+            print(
+                "The model returned no claims from any chunk. Check that the "
+                "transcript contains substantive content, or lower --min-salience.",
+                file=sys.stderr,
+            )
+        return 1
+
     print(f"\nNext: read every claim in {sheet_path} and mark a verdict on each.")
     return 0
 

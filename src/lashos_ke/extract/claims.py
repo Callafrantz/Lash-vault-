@@ -17,6 +17,7 @@ from lashos_ke.clean.segment import Chunk
 from lashos_ke.core import ids
 from lashos_ke.core.llm import (
     BudgetExceeded,
+    FatalLLMError,
     LLMError,
     RefusalError,
     StructuredClient,
@@ -77,6 +78,12 @@ class ExtractionStats:
     budget_exceeded: bool = False
     """The run hit its spend ceiling and stopped early. Whatever was extracted before
     that point is still valid and still written."""
+    stopped_reason: str | None = None
+    """Why the run aborted early, if it did — a spend ceiling or an error that would
+    repeat on every remaining chunk."""
+    last_error: str | None = None
+    """The most recent call failure. Without this a failed run is indistinguishable
+    from a transcript that genuinely contained no claims."""
 
     @property
     def verbatim_failures(self) -> int:
@@ -163,17 +170,19 @@ def extract_from_chunk(
             user=_render_user(user_template, chunk, meta),
             schema=schema,
         )
-    except RefusalError:
+    except RefusalError as exc:
         stats.refusals += 1
         stats.chunks_failed += 1
+        stats.last_error = str(exc)
         return []
-    except BudgetExceeded:
-        # Must escape the generic handler below: swallowing it would mark every
-        # remaining chunk "failed" and quietly turn a spend ceiling into a silently
-        # empty run.
+    except (BudgetExceeded, FatalLLMError):
+        # Must escape the generic handler below. Swallowing either would mark every
+        # remaining chunk "failed" and turn a spend ceiling — or a bad API key — into
+        # a run that reports zero claims as though the transcript were empty.
         raise
-    except LLMError:
+    except LLMError as exc:
         stats.chunks_failed += 1
+        stats.last_error = str(exc)
         return []
 
     stats.chunks_sent += 1
@@ -259,9 +268,15 @@ def extract_source(
                     stats=stats,
                 )
             )
-        except BudgetExceeded:
+        except BudgetExceeded as exc:
             # Stop, but return what was extracted: a partial pilot is still readable,
             # and re-running it would cost the same money a second time.
             stats.budget_exceeded = True
+            stats.stopped_reason = str(exc)
+            stats.last_error = str(exc)
+            break
+        except FatalLLMError as exc:
+            stats.stopped_reason = str(exc)
+            stats.last_error = str(exc)
             break
     return claims, stats

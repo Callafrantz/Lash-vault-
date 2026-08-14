@@ -21,6 +21,7 @@ __all__ = [
     "LLMError",
     "RefusalError",
     "BudgetExceeded",
+    "FatalLLMError",
     "StructuredClient",
     "to_structured_output_schema",
 ]
@@ -76,6 +77,24 @@ class RefusalError(LLMError):
 class BudgetExceeded(LLMError):
     """The run reached its spend ceiling. Callers should stop cleanly and keep partial
     output — a half-finished pilot is useful, a surprise bill is not."""
+
+
+class FatalLLMError(LLMError):
+    """A failure that will repeat identically on every remaining call.
+
+    A bad key, a misspelled model, revoked access: quarantining these chunk by chunk
+    burns through the whole corpus and reports a clean zero-claim run, which reads
+    exactly like a transcript that contained nothing. Stop on the first one and say
+    what happened.
+    """
+
+
+#: HTTP statuses where the next call fails for the same reason as this one.
+_FATAL_STATUSES = {
+    401: "authentication failed — check ANTHROPIC_API_KEY",
+    403: "access denied — the key is valid but not permitted to use this model",
+    404: "model not found — check the --model name",
+}
 
 
 @dataclass(slots=True)
@@ -247,6 +266,11 @@ class StructuredClient:
                     },
                 )
             except Exception as exc:  # SDK already retried transient failures
+                status = getattr(exc, "status_code", None)
+                if status in _FATAL_STATUSES:
+                    raise FatalLLMError(
+                        f"{_FATAL_STATUSES[status]} (HTTP {status})"
+                    ) from exc
                 raise LLMError(f"model call failed: {exc}") from exc
 
             # Always check stop_reason before reading content.
