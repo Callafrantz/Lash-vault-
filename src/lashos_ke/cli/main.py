@@ -92,6 +92,34 @@ def cmd_init(args: argparse.Namespace) -> int:
 # ── run ───────────────────────────────────────────────────────────────────
 
 
+def _credential_error(status: str, source: str) -> str:
+    """Actionable message for a run that has no usable credential.
+
+    The recurring failure is not a wrong key — it is a shell that never had one,
+    because `export` does not outlive the window it was typed in. The message says so
+    rather than just restating the export command.
+    """
+    if status == "placeholder":
+        return (
+            f"error: {source} is still the placeholder from the docs.\n"
+            "       Create a real key at https://console.anthropic.com → API keys,\n"
+            "       then: export ANTHROPIC_API_KEY=sk-ant-api03-<your-actual-key>"
+        )
+    return (
+        "error: no API key found in this shell.\n"
+        "\n"
+        "       export ANTHROPIC_API_KEY=sk-ant-api03-<your-key>\n"
+        "\n"
+        "       That lasts only for this Terminal window. A new tab starts with\n"
+        "       nothing, and rotating a key means exporting the new one. To make it\n"
+        "       stick:\n"
+        "         echo 'export ANTHROPIC_API_KEY=sk-ant-api03-<your-key>' >> ~/.zshrc\n"
+        "\n"
+        "       To check the current shell without printing the key:\n"
+        '         [ -n "$ANTHROPIC_API_KEY" ] && echo set || echo unset'
+    )
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     root = Path(args.input)
     transcripts = _find_transcripts(root)[: args.limit]
@@ -107,23 +135,21 @@ def cmd_run(args: argparse.Namespace) -> int:
     # segmentation before spending anything.
     client = None
     if not args.dry_run:
-        import os
+        from lashos_ke.core.llm import (
+            CredentialStatus,
+            LLMError,
+            StructuredClient,
+            credential_status,
+            supports_effort,
+        )
 
-        from lashos_ke.core.llm import LLMError, StructuredClient, supports_effort
-
-        # Catch the copy-pasted placeholder before spending a round trip on it. A real
-        # key never contains an ellipsis, and the resulting 401 arrives 18 chunks later
-        # looking like an empty transcript.
-        key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if "..." in key:
-            print(
-                "error: ANTHROPIC_API_KEY is still the placeholder "
-                f"({key!r}).\n"
-                "       Create a real key at https://console.anthropic.com → API keys, "
-                "then:\n"
-                "       export ANTHROPIC_API_KEY=sk-ant-<your-actual-key>",
-                file=sys.stderr,
-            )
+        # Resolve the credential before touching a transcript. The SDK resolves lazily —
+        # a client with no key constructs fine and fails only once a request is made —
+        # so without this check a missing key reads as a transcript that had nothing in
+        # it: zero claims, zero tokens, zero dollars, no obvious cause.
+        status, source = credential_status()
+        if status is not CredentialStatus.OK:
+            print(_credential_error(status, source), file=sys.stderr)
             return 2
 
         try:

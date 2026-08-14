@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,9 @@ __all__ = [
     "BudgetExceeded",
     "FatalLLMError",
     "supports_effort",
+    "CredentialStatus",
+    "credential_status",
+    "has_stored_profile",
     "StructuredClient",
     "to_structured_output_schema",
 ]
@@ -118,6 +122,77 @@ _FATAL_STATUSES = {
     403: "access denied — the key is valid but not permitted to use this model",
     404: "model not found — check the --model name",
 }
+
+#: Raised client-side by the SDK when it finds no credential at all. It never reaches
+#: the network, so it carries no status code and the table above cannot catch it — yet
+#: it is the most permanent failure of the lot.
+_NO_CREDENTIAL = "could not resolve authentication method"
+
+
+def _is_auth_failure(exc: Exception) -> bool:
+    """Whether this exception means no usable credential, not a transient fault."""
+    try:
+        import anthropic
+    except ImportError:  # pragma: no cover - environment dependent
+        pass
+    else:
+        if isinstance(exc, anthropic.AuthenticationError):
+            return True
+    # Fallback for the no-credential case, which is not an AuthenticationError. Matching
+    # on text is fragile by nature, so it is the second check rather than the only one:
+    # if the SDK rewords the message, this degrades to the repeated-failure guard in
+    # extract_source rather than silently losing the abort.
+    return _NO_CREDENTIAL in str(exc).lower()
+
+
+# ── Credential discovery ──────────────────────────────────────────────────
+# Checked before a run starts. The SDK resolves credentials lazily — a client with no
+# key constructs successfully and only fails once a request is made — so without this
+# a missing key looks like a transcript that produced nothing.
+
+
+class CredentialStatus(StrEnum):
+    OK = "ok"
+    PLACEHOLDER = "placeholder"
+    """The docs' example string was pasted literally, ellipsis and all."""
+    MISSING = "missing"
+
+
+#: Env vars the SDK reads, in its precedence order. First non-blank one wins.
+_KEY_ENV_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "LKE_MODEL_API_KEY")
+
+
+def _profile_dir() -> Path:
+    override = os.environ.get("ANTHROPIC_CONFIG_DIR")
+    if override:
+        return Path(override)
+    if os.name == "nt":  # pragma: no cover - platform dependent
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "Anthropic"
+    return Path.home() / ".config" / "anthropic"
+
+
+def has_stored_profile() -> bool:
+    """True if `ant auth login` left a profile the SDK can resolve without an env var."""
+    try:
+        return any((_profile_dir() / "credentials").glob("*.json"))
+    except OSError:  # pragma: no cover - permissions vary
+        return False
+
+
+def credential_status() -> tuple[CredentialStatus, str]:
+    """Resolve a credential the way the SDK will. Returns (status, where it came from)."""
+    for name in _KEY_ENV_VARS:
+        value = os.environ.get(name, "")
+        if not value.strip():
+            continue  # an empty var is not a credential, but does occupy its slot
+        if "..." in value:
+            return CredentialStatus.PLACEHOLDER, name
+        return CredentialStatus.OK, name
+    if has_stored_profile():
+        return CredentialStatus.OK, "stored profile"
+    return CredentialStatus.MISSING, ""
 
 
 @dataclass(slots=True)
@@ -308,6 +383,10 @@ class StructuredClient:
                     output_config=output_config,
                 )
             except Exception as exc:  # SDK already retried transient failures
+                # Checked first: the no-credential error has no status code, so the
+                # table below cannot see it, and it will fail identically forever.
+                if _is_auth_failure(exc):
+                    raise FatalLLMError(f"no usable API credential — {exc}") from exc
                 status = getattr(exc, "status_code", None)
                 if status in _FATAL_STATUSES:
                     raise FatalLLMError(

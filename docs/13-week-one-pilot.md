@@ -159,12 +159,34 @@ Expect roughly 60 claims per hour of content — 10 transcripts of ~45 minutes s
 yield **400–500 claims**.
 
 > **What a model key is.** It's a password that lets this code talk to the model —
-> a long string starting `sk-ant-`. Create one at
+> a long string starting `sk-ant-api03-`. Create one at
 > [console.anthropic.com](https://console.anthropic.com) → API keys, and put it in
 > your shell as `ANTHROPIC_API_KEY`. It is billed per use, it is not a subscription,
 > and it is separate from any Claude app subscription. Treat it like a password:
-> never commit it, never paste it into a document. The pilot's 10 transcripts cost
-> a few dollars, and the run prints its own spend at the end.
+> never commit it, never paste it into a document or a saved terminal log. The
+> pilot's 10 transcripts cost a few dollars, and the run prints its own spend at the
+> end.
+
+### The key does not survive a new Terminal window
+
+`export` sets a variable **for one shell only**. Open a new tab, reboot, or rotate the
+key, and that shell has no credential again — the single most common way this pilot
+fails. Make it stick once:
+
+```bash
+echo 'export ANTHROPIC_API_KEY=sk-ant-api03-<your-key>' >> ~/.zshrc
+source ~/.zshrc
+```
+
+To check the current shell without printing the key to screen:
+
+```bash
+[ -n "$ANTHROPIC_API_KEY" ] && echo set || echo unset
+```
+
+`pilot run` checks for a credential before it parses anything, so a missing key costs
+you a message rather than a run. If you use `ant auth login` instead, the stored
+profile is detected and no environment variable is needed.
 
 ### What it costs
 
