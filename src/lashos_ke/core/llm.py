@@ -16,9 +16,11 @@ from typing import Any
 
 __all__ = [
     "DEFAULT_MODEL",
+    "PRICING",
     "LLMResult",
     "LLMError",
     "RefusalError",
+    "BudgetExceeded",
     "StructuredClient",
     "to_structured_output_schema",
 ]
@@ -30,6 +32,38 @@ DEFAULT_MODEL = "claude-opus-5"
 #: mid-object and the parse fails for a reason that looks like a model error.
 DEFAULT_MAX_TOKENS = 8000
 
+#: USD per million tokens: (input, output). List prices, not contractual — this drives
+#: the run's cost display and the spend guard, both of which want an estimate that errs
+#: high rather than low.
+PRICING: dict[str, tuple[float, float]] = {
+    "claude-opus-5": (5.0, 25.0),
+    "claude-opus-4-8": (5.0, 25.0),
+    "claude-sonnet-5": (3.0, 15.0),
+    "claude-haiku-4-5": (1.0, 5.0),
+}
+
+#: Cache rates are a fixed multiple of the model's input price, so they need no second
+#: table — one that could silently drift out of step with the first.
+CACHE_READ_MULTIPLIER = 0.1
+CACHE_WRITE_MULTIPLIER = 1.25
+
+
+def _price_key(model: str) -> str | None:
+    """Resolve an API model ID to a pricing key.
+
+    The API returns dated IDs (`claude-haiku-4-5-20251001`) while the table is keyed on
+    families, so match on the longest prefix rather than requiring an exact hit — a new
+    snapshot of a known model should not fall off the price table.
+    """
+    name = (model or "").strip().lower()
+    if name in PRICING:
+        return name
+    best: str | None = None
+    for key in PRICING:
+        if name.startswith(key) and (best is None or len(key) > len(best)):
+            best = key
+    return best
+
 
 class LLMError(RuntimeError):
     """Model call failed in a way the caller should quarantine rather than retry."""
@@ -37,6 +71,11 @@ class LLMError(RuntimeError):
 
 class RefusalError(LLMError):
     """Safety classifiers declined the request (stop_reason == 'refusal')."""
+
+
+class BudgetExceeded(LLMError):
+    """The run reached its spend ceiling. Callers should stop cleanly and keep partial
+    output — a half-finished pilot is useful, a surprise bill is not."""
 
 
 @dataclass(slots=True)
@@ -145,6 +184,7 @@ class StructuredClient:
         api_key: str | None = None,
         effort: str = "high",
         max_tokens: int = DEFAULT_MAX_TOKENS,
+        max_spend_usd: float | None = None,
     ) -> None:
         try:
             import anthropic
@@ -162,7 +202,8 @@ class StructuredClient:
         self.model = model
         self.effort = effort
         self.max_tokens = max_tokens
-        self.total = LLMResult(data={})
+        self.max_spend_usd = max_spend_usd
+        self.total = LLMResult(data={}, model=model)
 
     def structured(
         self,
@@ -173,6 +214,14 @@ class StructuredClient:
         max_tokens: int | None = None,
     ) -> LLMResult:
         """One structured-output call. Raises LLMError on unusable output."""
+        # Checked BEFORE the call, not after: a ceiling enforced after spending is not a
+        # ceiling. This over-shoots by at most one call.
+        if self.max_spend_usd is not None and self.total.cost_usd >= self.max_spend_usd:
+            raise BudgetExceeded(
+                f"spend ceiling reached: ${self.total.cost_usd:.2f} of "
+                f"${self.max_spend_usd:.2f}"
+            )
+
         api_schema = to_structured_output_schema(schema)
         warnings: list[str] = []
         last_error: Exception | None = None
@@ -214,6 +263,11 @@ class StructuredClient:
                 warnings.append(f"attempt {attempt}: unparseable JSON")
                 continue
 
+            if _price_key(response.model) is None:
+                warnings.append(
+                    f"unknown model {response.model!r} — cost priced at the ceiling"
+                )
+
             usage = response.usage
             result = LLMResult(
                 data=data,
@@ -236,3 +290,7 @@ class StructuredClient:
         t.output_tokens += r.output_tokens
         t.cache_read_tokens += r.cache_read_tokens
         t.cache_write_tokens += r.cache_write_tokens
+        # Carry the served model forward, or the total has nothing to price against and
+        # every run reports at the ceiling. A run uses one model, so last-wins is exact.
+        if r.model:
+            t.model = r.model

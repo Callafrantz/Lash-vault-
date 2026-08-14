@@ -22,6 +22,7 @@ _MISSED_RE = re.compile(r"^-\s*missed_claims:\s*(\d+)\s*$", re.M)
 _CLAIM_RE = re.compile(r"^###\s+(\S+)", re.M)
 _SOURCE_RE = re.compile(r"^##\s+SOURCE\s+(\S+)\s*$", re.M)
 _VF_RE = re.compile(r"^-\s*verbatim_failures:\s*(\d+)\s*$", re.M)
+_PARA_RE = re.compile(r"^-\s*quote_paraphrased:\s*(\d+)\s*$", re.M)
 
 
 def _timestamp(seconds: float | None) -> str:
@@ -96,6 +97,7 @@ def render_sheet(
             "",
             f"{MISSED_LINE} ",
             f"- verbatim_failures: {source.get('verbatim_failures', 0)}",
+            f"- quote_paraphrased: {source.get('paraphrase_failures', 0)}",
             "",
         ]
         if not claims:
@@ -146,6 +148,9 @@ def parse_sheet(text: str) -> list[TranscriptAudit]:
         vf = _VF_RE.search(body)
         if vf:
             audit.verbatim_failures = int(vf.group(1))
+        para = _PARA_RE.search(body)
+        if para:
+            audit.paraphrase_failures = int(para.group(1))
 
         # Parse per-claim blocks rather than zipping two flat lists. Positional pairing
         # would silently attribute a reviewer's verdict to the WRONG claim the moment the

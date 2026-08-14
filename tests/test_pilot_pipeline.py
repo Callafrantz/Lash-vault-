@@ -197,6 +197,7 @@ class TestAuditSheetRoundTrip:
                     "meta": {"title": "T", "creator": "Jane Doe", "platform": "youtube"},
                     "claims": [self._claim("clm_aaaaaaaaaaaa"), self._claim("clm_bbbbbbbbbbbb")],
                     "verbatim_failures": 1,
+                    "paraphrase_failures": 1,
                 }
             ]
         )
@@ -219,7 +220,22 @@ class TestAuditSheetRoundTrip:
         assert audits[0].source_id == "src_yt_202403_a3f9c1d2"
         assert audits[0].missed_claims == 3
         assert audits[0].verbatim_failures == 1
+        assert audits[0].paraphrase_failures == 1
         assert [c.verdict for c in audits[0].claims] == [Verdict.CORRECT, Verdict.SCOPE_WRONG]
+
+    def test_paraphrase_count_survives_the_round_trip(self) -> None:
+        """The reviewer never types this number — the run writes it, and scoring reads
+        it back. If it does not survive, the report silently loses its diagnosis."""
+        sheet = self._sheet()
+        assert "- quote_paraphrased: 1" in sheet
+        assert parse_sheet(sheet)[0].paraphrase_failures == 1
+
+    def test_missing_paraphrase_line_defaults_to_zero(self) -> None:
+        """Sheets written before this field existed must still parse."""
+        stripped = "\n".join(
+            ln for ln in self._sheet().splitlines() if not ln.startswith("- quote_paraphrased:")
+        )
+        assert parse_sheet(stripped)[0].paraphrase_failures == 0
 
     def test_unmarked_claims_are_skipped_not_fatal(self) -> None:
         """A half-reviewed sheet must still score what was reviewed."""

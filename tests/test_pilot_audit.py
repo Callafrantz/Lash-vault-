@@ -7,12 +7,19 @@ import pytest
 from lashos_ke.evals.audit import ClaimAudit, TranscriptAudit, Verdict, score_pilot
 
 
-def _audit(source: str, verdicts: list[Verdict], missed: int = 0, vf: int = 0) -> TranscriptAudit:
+def _audit(
+    source: str,
+    verdicts: list[Verdict],
+    missed: int = 0,
+    vf: int = 0,
+    para: int = 0,
+) -> TranscriptAudit:
     return TranscriptAudit(
         source_id=source,
         claims=[ClaimAudit(f"clm_{source}_{i}", v) for i, v in enumerate(verdicts)],
         missed_claims=missed,
         verbatim_failures=vf,
+        paraphrase_failures=para,
     )
 
 
@@ -30,6 +37,58 @@ class TestHardStop:
     def test_no_fabrication_is_not_a_hard_stop(self) -> None:
         score = score_pilot([_audit("a", [Verdict.CORRECT] * 90 + [Verdict.NOT_A_CLAIM] * 10)])
         assert not score.hard_stop
+
+
+class TestParaphraseInterpretation:
+    """A failing verbatim gate has two very different causes, and the report has to say
+    which one it is looking at — otherwise a prompt problem reads as an architecture
+    failure and stops the build for the wrong reason."""
+
+    def test_paraphrase_dominated_failure_says_it_is_not_architectural(self) -> None:
+        score = score_pilot([_audit("a", [Verdict.CORRECT] * 100, vf=10, para=9)])
+        assert not score.gate_results["verbatim_failure_rate"]
+        assert score.paraphrase_dominates
+        assert "not an architecture failure" in score.report()
+
+    def test_fabrication_dominated_failure_gets_no_reassurance(self) -> None:
+        score = score_pilot([_audit("a", [Verdict.CORRECT] * 100, vf=10, para=1)])
+        assert not score.paraphrase_dominates
+        assert "not an architecture failure" not in score.report()
+
+    def test_no_reassurance_when_the_verbatim_gate_passes(self) -> None:
+        """A gate that passed needs no explanation — the note would be noise."""
+        score = score_pilot([_audit("a", [Verdict.CORRECT] * 1000, vf=1, para=1)])
+        assert score.gate_results["verbatim_failure_rate"]
+        assert "not an architecture failure" not in score.report()
+
+    def test_split_is_shown_in_the_metrics_table(self) -> None:
+        score = score_pilot([_audit("a", [Verdict.CORRECT] * 100, vf=10, para=6)])
+        assert "of which paraphrase" in score.report()
+        assert "6/10" in score.report()
+
+    def test_validator_fabrications_are_the_remainder(self) -> None:
+        score = score_pilot([_audit("a", [Verdict.CORRECT] * 100, vf=10, para=6)])
+        assert score.validator_fabrications == 4
+
+    def test_paraphrase_count_cannot_exceed_verbatim_failures(self) -> None:
+        """A hand-edited sheet can report nonsense; it must not drive the count
+        negative and silence the fabrication signal."""
+        score = score_pilot([_audit("a", [Verdict.CORRECT] * 100, vf=2, para=50)])
+        assert score.paraphrase_failures == 2
+        assert score.validator_fabrications == 0
+
+    def test_paraphrase_never_masks_a_hard_stop(self) -> None:
+        """A human-marked FABRICATED verdict outranks any validator-level reassurance."""
+        score = score_pilot(
+            [_audit("a", [Verdict.CORRECT] * 99 + [Verdict.FABRICATED], vf=10, para=10)]
+        )
+        assert score.hard_stop
+        assert "HARD STOP" in score.report()
+
+    def test_zero_failures_reports_no_split(self) -> None:
+        score = score_pilot([_audit("a", [Verdict.CORRECT] * 100)])
+        assert not score.paraphrase_dominates
+        assert "of which paraphrase" not in score.report()
 
 
 class TestGates:

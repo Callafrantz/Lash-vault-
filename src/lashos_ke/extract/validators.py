@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from enum import StrEnum
 
 __all__ = [
@@ -20,6 +21,8 @@ __all__ = [
     "validate_claim",
     "QuoteMatch",
     "match_verbatim",
+    "quote_similarity",
+    "PARAPHRASE_THRESHOLD",
 ]
 
 
@@ -96,6 +99,62 @@ def match_verbatim(quote: str, source_text: str) -> tuple[QuoteMatch, int | None
     return QuoteMatch.NOT_FOUND, None
 
 
+# ── Paraphrase vs fabrication ─────────────────────────────────────────────
+# This changes the DIAGNOSIS, never the outcome: both cases are still discarded, and
+# the verbatim guarantee above is untouched.
+#
+# Why it matters: a model that rewrites "if you're above sixty percent humidity" as
+# "if you're above 60% humidity" and one that invents a quote outright both landed as
+# `quote_not_found`. Since fabrication is the pilot's single hard-stop gate, that
+# conflation risks concluding the architecture is unsound when the real finding is a
+# model that needs a firmer instruction or a higher effort setting.
+
+#: Measured on realistic pairs: light and moderate rewrites (dropped filler, expanded
+#: contraction, "sixty percent" -> "60%") score 0.90-1.00, while invented quotes on the
+#: same topic top out near 0.30. 0.75 sits in that gap with a wide margin.
+PARAPHRASE_THRESHOLD = 0.75
+
+#: Spelled-out numbers are the single most common rewrite in ASR text, so folding them
+#: to digits before comparing is what separates "same span, different notation" from
+#: "different content".
+_NUMBER_WORDS = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+    "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14",
+    "fifteen": "15", "sixteen": "16", "seventeen": "17", "eighteen": "18",
+    "nineteen": "19", "twenty": "20", "thirty": "30", "forty": "40", "fifty": "50",
+    "sixty": "60", "seventy": "70", "eighty": "80", "ninety": "90", "hundred": "100",
+    "percent": "%",
+}
+#: Letters, numbers and `%` tokenize separately so that "60%" and "sixty percent"
+#: reduce to the same two tokens. Lumping them into one token would leave the two
+#: notations unable to align at all.
+_TOKEN = re.compile(r"[a-z]+|\d+(?:\.\d+)?|%")
+
+
+def _tokens(text: str) -> list[str]:
+    return [_NUMBER_WORDS.get(t, t) for t in _TOKEN.findall(text.lower())]
+
+
+def quote_similarity(quote: str, source_text: str) -> float:
+    """How much of `quote` appears, in order, somewhere in `source_text` (0.0-1.0).
+
+    Only meaningful once `match_verbatim` has already returned NOT_FOUND. Order-aware
+    and punctuation-insensitive; deliberately NOT a semantic measure — a genuine
+    reword ("when humidity exceeds 60%" for "if you're above sixty percent humidity")
+    shares too little surface to score above the threshold and stays classified as
+    fabrication. That bias is intended: a false fabrication alarm costs an
+    investigation, while a fabrication mislabelled as a harmless paraphrase hides the
+    one failure the pilot exists to catch.
+    """
+    q = _tokens(quote)
+    s = _tokens(source_text)
+    if not q or not s:
+        return 0.0
+    matcher = SequenceMatcher(None, q, s, autojunk=False)
+    return sum(block.size for block in matcher.get_matching_blocks()) / len(q)
+
+
 # ── Controlled ranges ─────────────────────────────────────────────────────
 # Values outside these are almost always ASR errors ("point seven" heard as "0.7"),
 # not genuine assertions. Flagged rather than discarded — the claim may still be
@@ -161,13 +220,26 @@ def validate_claim(
     # 1. Verbatim fidelity — the hard gate.
     kind, _offset = match_verbatim(quote, chunk_raw_text)
     if kind is QuoteMatch.NOT_FOUND:
-        findings.append(
-            Finding(
-                "quote_not_found",
-                Severity.DISCARD,
-                "verbatim_quote does not appear in the source chunk",
+        # Discarded either way — the split only tells you WHICH failure you are looking
+        # at, which is the difference between "tune the prompt" and "stop the build".
+        similarity = quote_similarity(quote, chunk_raw_text)
+        if similarity >= PARAPHRASE_THRESHOLD:
+            findings.append(
+                Finding(
+                    "quote_paraphrased",
+                    Severity.DISCARD,
+                    f"verbatim_quote rewrites a real span (similarity {similarity:.2f})",
+                )
             )
-        )
+        else:
+            findings.append(
+                Finding(
+                    "quote_not_found",
+                    Severity.DISCARD,
+                    "verbatim_quote does not appear in the source chunk "
+                    f"(similarity {similarity:.2f})",
+                )
+            )
     elif kind is QuoteMatch.WHITESPACE_NORMALIZED:
         findings.append(
             Finding("quote_whitespace_normalized", Severity.FLAG, "matched after whitespace collapse")

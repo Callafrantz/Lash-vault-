@@ -58,6 +58,9 @@ class TranscriptAudit:
     transcript can count these, and recall is meaningless without them."""
     verbatim_failures: int = 0
     """Claims discarded by the validator before reaching the audit sheet."""
+    paraphrase_failures: int = 0
+    """Of those, the ones that rewrote a span which really exists in the transcript.
+    A subset of verbatim_failures, not an addition to it."""
 
 
 @dataclass(slots=True)
@@ -73,10 +76,29 @@ class PilotScore:
     verbatim_failure_rate: float
     gate_results: dict[str, bool]
     breakdown: dict[str, int]
+    verbatim_failures: int = 0
+    paraphrase_failures: int = 0
 
     @property
     def passed(self) -> bool:
         return all(self.gate_results.values())
+
+    @property
+    def validator_fabrications(self) -> int:
+        """Discarded quotes with no recognisable counterpart in the transcript."""
+        return max(0, self.verbatim_failures - self.paraphrase_failures)
+
+    @property
+    def paraphrase_dominates(self) -> bool:
+        """Most verbatim failures were rewrites of real spans, not invented content.
+
+        This distinction decides what you do next, and the two answers are far apart:
+        tune the prompt, or stop and question the architecture.
+        """
+        return (
+            self.verbatim_failures > 0
+            and self.paraphrase_failures > self.validator_fabrications
+        )
 
     @property
     def hard_stop(self) -> bool:
@@ -98,6 +120,13 @@ class PilotScore:
             ("Verbatim failure rate", f"{self.verbatim_failure_rate:.1%}"),
             ("Fabricated quotes", str(self.fabrication_count)),
         ]
+        if self.verbatim_failures:
+            rows.append(
+                (
+                    "  of which paraphrase",
+                    f"{self.paraphrase_failures}/{self.verbatim_failures}",
+                )
+            )
         lines += [f"  {k:<26} {v:>10}" for k, v in rows]
 
         lines += ["", "GATES", "-" * 60]
@@ -108,6 +137,18 @@ class PilotScore:
         lines += [f"  {k:<26} {v:>10}" for k, v in sorted(self.breakdown.items())]
 
         lines += ["", "=" * 60]
+        if self.paraphrase_dominates and not self.gate_results.get(
+            "verbatim_failure_rate", True
+        ):
+            lines += [
+                f"NOTE — {self.paraphrase_failures} of {self.verbatim_failures} verbatim "
+                "failures were paraphrases: the model",
+                "reworded a span that really is in the transcript, rather than",
+                "inventing one. Provenance held, and the claims were discarded",
+                "exactly as designed. Raise --effort or use a stronger model and",
+                "re-run. This is not an architecture failure.",
+                "",
+            ]
         if self.hard_stop:
             lines.append("HARD STOP — fabricated quotes detected.")
             lines.append("Provenance is unsound. Diagnose before any further build.")
@@ -147,6 +188,12 @@ def score_pilot(audits: list[TranscriptAudit]) -> PilotScore:
 
     missed = sum(a.missed_claims for a in audits)
     verbatim_failures = sum(a.verbatim_failures for a in audits)
+    # Clamped: paraphrases are a subset of verbatim failures, and a hand-edited sheet
+    # can report more of them than there are failures. Trusting that arithmetic would
+    # make validator_fabrications negative and silence the hard-stop guidance.
+    paraphrase_failures = min(
+        verbatim_failures, sum(a.paraphrase_failures for a in audits)
+    )
 
     # Accuracy of each annotation is measured over real claims only. Judging tier
     # accuracy on conversational filler that should never have been extracted would
@@ -185,4 +232,6 @@ def score_pilot(audits: list[TranscriptAudit]) -> PilotScore:
         verbatim_failure_rate=round(verbatim_failure_rate, 4),
         gate_results=gate_results,
         breakdown=breakdown,
+        verbatim_failures=verbatim_failures,
+        paraphrase_failures=paraphrase_failures,
     )

@@ -153,7 +153,7 @@ Writes `data/pilot/claims.jsonl` (machine-readable) and `data/pilot/audit.md` (y
 reading sheet), and prints a summary including token spend and approximate cost.
 
 **Useful flags:** `--effort medium` (cheaper, still strong), `--min-salience 0.2`
-(send more chunks if recall looks low), `--limit N`.
+(send more chunks if recall looks low), `--limit N`, `--max-spend N`.
 
 Expect roughly 60 claims per hour of content — 10 transcripts of ~45 minutes should
 yield **400–500 claims**.
@@ -166,6 +166,41 @@ yield **400–500 claims**.
 > never commit it, never paste it into a document. The pilot's 10 transcripts cost
 > a few dollars, and the run prints its own spend at the end.
 
+### What it costs
+
+Estimated against the real prompt and 45-minute transcripts, with the salience gate
+removing roughly 45% of chunks and the system prompt cached after the first call:
+
+| Model | 1 transcript | 10 transcripts |
+| --- | --- | --- |
+| Opus 5 | ~$0.38 | ~$3.75 |
+| Sonnet 5 | ~$0.15 | ~$1.50 |
+| Haiku 4.5 | ~$0.08 | ~$0.75 |
+
+The run reports its own spend, priced per model — including which model actually served
+the request, since that is what determines the rate. An unrecognised model ID is priced
+at the most expensive entry, so an unfamiliar name over-estimates rather than surprising
+you.
+
+**`--max-spend` is a hard ceiling**, defaulting to `$5.00`. It is checked *before* each
+call, so a run can exceed it by at most one call's cost. When it trips, the run stops
+and **still writes `claims.jsonl` and `audit.md`** for everything extracted up to that
+point, naming the transcript it stopped on. A partial pilot is useful; a surprise bill
+is not.
+
+```bash
+python3 -m lashos_ke.cli.main pilot run --limit 10 --max-spend 2.00
+```
+
+> **On privacy.** The Anthropic API does not train on API inputs or outputs by default.
+> Your education manual and licensed course transcripts stay yours on this path — which
+> matters here, because the highest-value sources in your corpus are also the ones you
+> are least free to leak.
+
+`src/lashos_ke/core/llm.py` is the only file in the codebase that talks to a model
+provider. Moving to a local or free-tier model later is a contained change to that one
+file — worth knowing, not worth building now.
+
 ### Start with ONE transcript
 
 Do not run all ten first. Point it at a single transcript, read those ~40 claims, and
@@ -173,8 +208,16 @@ you will know within half an hour whether extraction is fundamentally sound. If 
 broken, you have saved yourself the other nine and the six hours of reading.
 
 ```bash
+# Cheap first pass — shakes out format and plumbing problems for pennies.
+python3 -m lashos_ke.cli.main pilot run --limit 1 --model claude-haiku-4-5
+
+# Then the same transcript on the strong model, for the real quality read.
 python3 -m lashos_ke.cli.main pilot run --limit 1
 ```
+
+Both runs together cost under fifty cents. The first tells you whether the *pipeline*
+works; only the second tells you whether *extraction* works, so do not judge the
+architecture on the Haiku pass.
 
 Scale to ten only once the first one looks right.
 
@@ -212,7 +255,7 @@ python3 -m lashos_ke.cli.main pilot score
 | Metric | Gate | If it fails |
 | --- | --- | --- |
 | Fabricated quotes | **0** | **Hard stop.** Provenance is the foundation; investigate before anything else |
-| Verbatim validation failures | ≤ 2% | Tighten the prompt's quoting instruction |
+| Verbatim validation failures | ≤ 2% | Tighten the prompt's quoting instruction — but read the paraphrase split first |
 | Extraction precision (`correct` + `type_wrong`) | ≥ 90% | Prompt work |
 | Claim-type accuracy | ≥ 85% | Prompt work; may need few-shot examples |
 | Evidence-tier accuracy | ≥ 80% | Tier rubric needs sharpening |
@@ -220,11 +263,43 @@ python3 -m lashos_ke.cli.main pilot score
 | Recall (missed claims) | ≥ 85% | Segmentation or salience gating too aggressive |
 | Cost per transcript | ≤ 1.3× budget | Tune salience gating |
 
+### Paraphrase is not fabrication
+
+A quote that cannot be found verbatim has two possible causes, and they call for opposite
+responses. The validator separates them and the report shows the split:
+
+```
+  Verbatim failure rate            8.3%
+  Fabricated quotes                   0
+    of which paraphrase             9/10
+```
+
+- **`quote_paraphrased`** — the model reworded a span that genuinely is in the transcript
+  ("if you're above sixty percent humidity" → "if you're above 60% humidity"). Provenance
+  held: the claim was discarded exactly as designed. Raise `--effort`, or use a stronger
+  model, and re-run. **This is not an architecture failure.**
+- **`quote_not_found`** — no similar span exists. The content was invented. This is the
+  failure the pilot exists to catch.
+
+**Both are still discarded.** The verbatim guarantee does not bend for a near miss — a
+"close enough" quote is a quote the speaker did not say, and attaching their name and a
+timestamp to it is precisely what this system exists to prevent. The split changes the
+diagnosis, never the outcome.
+
+The classifier is deliberately conservative: it scores surface overlap, not meaning, so a
+heavy reword ("when humidity exceeds 60%") scores too low and is reported as
+`quote_not_found`. That bias is intentional — a false fabrication alarm costs you an
+investigation, while a fabrication excused as a harmless paraphrase hides the one failure
+that should stop the build. Each finding carries its similarity score, so you can open a
+borderline case and judge it yourself.
+
 ### Reading the result
 
 - **All gates pass** → the architecture holds. Proceed to Phase 1 in `docs/12` and scale to 50.
 - **Precision/type/tier fail, no fabrication** → normal. This is prompt engineering, 2–3
   iterations. The architecture is fine.
+- **Verbatim gate fails, mostly paraphrase** → prompt or model strength, not architecture.
+  See the split above before concluding anything.
 - **Fabrication > 0** → stop and diagnose. Either the model is inventing quotes (change the
   approach) or the transcript text is being mutated between S1 and S2 (a bug — more likely).
 - **Recall < 70%** → the problem is upstream in segmentation, not extraction.

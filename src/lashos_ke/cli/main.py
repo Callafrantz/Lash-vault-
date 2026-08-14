@@ -110,7 +110,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         from lashos_ke.core.llm import LLMError, StructuredClient
 
         try:
-            client = StructuredClient(model=args.model, effort=args.effort)
+            client = StructuredClient(
+                model=args.model, effort=args.effort, max_spend_usd=args.max_spend
+            )
         except LLMError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
@@ -160,10 +162,17 @@ def cmd_run(args: argparse.Namespace) -> int:
             meta=meta,
             min_salience=args.min_salience,
         )
+        verbatim_note = ""
+        if stats.verbatim_failures:
+            verbatim_note = f" · {stats.verbatim_failures} VERBATIM FAILURES"
+            if stats.paraphrase_failures:
+                verbatim_note += (
+                    f" ({stats.paraphrase_failures} paraphrase, "
+                    f"{stats.fabrication_failures} not found)"
+                )
         print(
             f"  {stats.claims_returned} returned · {stats.claims_kept} kept · "
-            f"{stats.claims_discarded} discarded"
-            + (f" · {stats.verbatim_failures} VERBATIM FAILURES" if stats.verbatim_failures else "")
+            f"{stats.claims_discarded} discarded" + verbatim_note
         )
 
         for field_name in (
@@ -184,8 +193,18 @@ def cmd_run(args: argparse.Namespace) -> int:
                 "meta": {**meta, "title": meta.get("title") or path.stem},
                 "claims": rows,
                 "verbatim_failures": stats.verbatim_failures,
+                "paraphrase_failures": stats.paraphrase_failures,
             }
         )
+
+        if stats.budget_exceeded:
+            print(
+                f"\n  STOPPED — spend ceiling of ${args.max_spend:.2f} reached while "
+                f"extracting {path.name}."
+            )
+            print("  Everything extracted so far is still written below.")
+            print("  Raise it with --max-spend, or re-run with --limit to do less.")
+            break
 
     if args.dry_run:
         print("\nDry run complete — segmentation only. Re-run without --dry-run to extract.")
@@ -200,7 +219,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"claims        {totals.claims_kept} kept / {totals.claims_returned} returned")
     print(f"chunks        {totals.chunks_sent} sent / {totals.chunks_total} total")
     if totals.verbatim_failures:
-        print(f"VERBATIM      {totals.verbatim_failures} failures — investigate before scoring")
+        print(
+            f"VERBATIM      {totals.verbatim_failures} failures "
+            f"({totals.paraphrase_failures} paraphrase, "
+            f"{totals.fabrication_failures} not found) — investigate before scoring"
+        )
     if totals.discard_reasons:
         print("discards      " + ", ".join(f"{k}={v}" for k, v in sorted(totals.discard_reasons.items())))
     if totals.flag_reasons:
@@ -209,7 +232,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     if t:
         print(
             f"tokens        in={t.input_tokens} out={t.output_tokens} "
-            f"cache_read={t.cache_read_tokens} · approx ${t.cost_usd:.2f}"
+            f"cache_read={t.cache_read_tokens} · approx ${t.cost_usd:.2f} "
+            f"({t.model or args.model})"
         )
     print("=" * 60)
     print(f"\nWrote {claims_path} and {sheet_path}")
@@ -260,6 +284,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--model", default="claude-opus-5")
     p_run.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
     p_run.add_argument("--min-salience", type=float, default=0.30, dest="min_salience")
+    p_run.add_argument(
+        "--max-spend",
+        type=float,
+        default=5.00,
+        dest="max_spend",
+        help="stop once estimated spend reaches this many USD (default 5.00). "
+        "Partial results are still written.",
+    )
     p_run.add_argument(
         "--dry-run",
         action="store_true",

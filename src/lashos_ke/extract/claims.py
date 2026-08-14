@@ -15,7 +15,13 @@ from typing import Any
 
 from lashos_ke.clean.segment import Chunk
 from lashos_ke.core import ids
-from lashos_ke.core.llm import LLMError, RefusalError, StructuredClient, load_schema
+from lashos_ke.core.llm import (
+    BudgetExceeded,
+    LLMError,
+    RefusalError,
+    StructuredClient,
+    load_schema,
+)
 from lashos_ke.extract.validators import Severity, validate_claim
 
 __all__ = ["ExtractedClaim", "ExtractionStats", "extract_from_chunk", "extract_source"]
@@ -68,13 +74,29 @@ class ExtractionStats:
     discard_reasons: dict[str, int] = field(default_factory=dict)
     flag_reasons: dict[str, int] = field(default_factory=dict)
     refusals: int = 0
+    budget_exceeded: bool = False
+    """The run hit its spend ceiling and stopped early. Whatever was extracted before
+    that point is still valid and still written."""
 
     @property
     def verbatim_failures(self) -> int:
-        """Claims dropped because the quote could not be located in the source.
+        """Claims dropped because the quote could not be located verbatim.
 
-        This is the number the pilot's hard gate is measured against.
+        This is the number the pilot's hard gate is measured against, and it counts
+        paraphrases as well as fabrications — the guarantee is verbatim fidelity, and a
+        rewritten quote breaches it regardless of intent. The split exists to explain a
+        failure, not to excuse one.
         """
+        return self.paraphrase_failures + self.fabrication_failures
+
+    @property
+    def paraphrase_failures(self) -> int:
+        """Quotes that rewrite a span which genuinely exists in the source."""
+        return self.discard_reasons.get("quote_paraphrased", 0)
+
+    @property
+    def fabrication_failures(self) -> int:
+        """Quotes with no recognisable counterpart in the source."""
         return self.discard_reasons.get("quote_not_found", 0)
 
     def record(self, code: str, severity: Severity) -> None:
@@ -145,6 +167,11 @@ def extract_from_chunk(
         stats.refusals += 1
         stats.chunks_failed += 1
         return []
+    except BudgetExceeded:
+        # Must escape the generic handler below: swallowing it would mark every
+        # remaining chunk "failed" and quietly turn a spend ceiling into a silently
+        # empty run.
+        raise
     except LLMError:
         stats.chunks_failed += 1
         return []
@@ -219,16 +246,22 @@ def extract_source(
         if chunk.salience < min_salience:
             stats.chunks_skipped_salience += 1
             continue
-        claims.extend(
-            extract_from_chunk(
-                client,
-                chunk,
-                source_id=source_id,
-                meta=meta,
-                schema=schema,
-                system=system,
-                user_template=user_template,
-                stats=stats,
+        try:
+            claims.extend(
+                extract_from_chunk(
+                    client,
+                    chunk,
+                    source_id=source_id,
+                    meta=meta,
+                    schema=schema,
+                    system=system,
+                    user_template=user_template,
+                    stats=stats,
+                )
             )
-        )
+        except BudgetExceeded:
+            # Stop, but return what was extracted: a partial pilot is still readable,
+            # and re-running it would cost the same money a second time.
+            stats.budget_exceeded = True
+            break
     return claims, stats

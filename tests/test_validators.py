@@ -8,9 +8,11 @@ provenance rests on that behaviour, so it is tested hardest.
 from __future__ import annotations
 
 from lashos_ke.extract.validators import (
+    PARAPHRASE_THRESHOLD,
     QuoteMatch,
     Severity,
     match_verbatim,
+    quote_similarity,
     validate_claim,
 )
 
@@ -84,6 +86,108 @@ class TestFabricationGuard:
         result = validate_claim(_claim(), chunk_raw_text=CHUNK)
         assert result.ok
         assert "quote_not_found" not in result.codes
+
+
+class TestParaphraseClassifier:
+    """Paraphrase and fabrication are both discarded — the guarantee does not bend.
+
+    The split exists because the two demand opposite responses: a paraphrasing model
+    needs a firmer prompt, while a fabricating model means attribution cannot be
+    trusted at all. Conflating them risks halting the build over a prompt problem.
+    """
+
+    def test_reworded_quote_is_classified_as_paraphrase(self) -> None:
+        result = validate_claim(
+            _claim(verbatim_quote="if you are above 60% humidity your glue is curing"),
+            chunk_raw_text=CHUNK,
+        )
+        assert "quote_paraphrased" in result.codes
+
+    def test_a_paraphrase_is_still_discarded(self) -> None:
+        """The whole point: a better diagnosis must not become a softer gate."""
+        result = validate_claim(
+            _claim(verbatim_quote="if you are above 60% humidity your glue is curing"),
+            chunk_raw_text=CHUNK,
+        )
+        assert not result.ok
+        assert result.discarded
+
+    def test_punctuation_and_capitalisation_fixes_are_paraphrase(self) -> None:
+        result = validate_claim(
+            _claim(
+                verbatim_quote=(
+                    "If you're above sixty percent humidity, your glue is curing."
+                )
+            ),
+            chunk_raw_text=CHUNK,
+        )
+        assert "quote_paraphrased" in result.codes
+
+    def test_invented_quote_is_not_excused_as_paraphrase(self) -> None:
+        result = validate_claim(
+            _claim(verbatim_quote="humidity should stay below forty percent for retention"),
+            chunk_raw_text=CHUNK,
+        )
+        assert "quote_not_found" in result.codes
+        assert "quote_paraphrased" not in result.codes
+
+    def test_on_topic_invention_is_still_fabrication(self) -> None:
+        """The dangerous case: plausible, uses the right vocabulary, was never said."""
+        result = validate_claim(
+            _claim(verbatim_quote="you must replace your adhesive every four weeks"),
+            chunk_raw_text=CHUNK,
+        )
+        assert "quote_not_found" in result.codes
+
+    def test_findings_report_the_similarity_score(self) -> None:
+        """The number is what lets a human overrule the label on a borderline case."""
+        result = validate_claim(
+            _claim(verbatim_quote="humidity should stay below forty percent for retention"),
+            chunk_raw_text=CHUNK,
+        )
+        detail = next(f.detail for f in result.findings if f.code == "quote_not_found")
+        assert "similarity" in detail
+
+    def test_both_codes_carry_discard_severity(self) -> None:
+        for quote in (
+            "if you are above 60% humidity your glue is curing",
+            "humidity should stay below forty percent for retention",
+        ):
+            result = validate_claim(_claim(verbatim_quote=quote), chunk_raw_text=CHUNK)
+            quote_findings = [
+                f for f in result.findings
+                if f.code in {"quote_paraphrased", "quote_not_found"}
+            ]
+            assert quote_findings
+            assert all(f.severity is Severity.DISCARD for f in quote_findings)
+
+
+class TestQuoteSimilarity:
+    def test_verbatim_span_scores_one(self) -> None:
+        assert quote_similarity("above sixty percent humidity", CHUNK) == 1.0
+
+    def test_spelled_numbers_match_digits(self) -> None:
+        """'sixty percent' and '60%' are the same measurement written two ways — the
+        most common rewrite in ASR text, and not evidence of invention."""
+        assert quote_similarity("above 60% humidity", CHUNK) >= PARAPHRASE_THRESHOLD
+
+    def test_invented_content_scores_far_below_the_threshold(self) -> None:
+        score = quote_similarity("humidity should stay below forty percent", CHUNK)
+        assert score < PARAPHRASE_THRESHOLD
+
+    def test_unrelated_text_scores_near_zero(self) -> None:
+        assert quote_similarity("clients pay two hundred dollars per fill", CHUNK) < 0.4
+
+    def test_empty_inputs_score_zero(self) -> None:
+        assert quote_similarity("", CHUNK) == 0.0
+        assert quote_similarity("anything at all", "") == 0.0
+
+    def test_order_matters(self) -> None:
+        """Same words, scrambled, is not the same quote — an order-blind measure would
+        wave through a reordering that changes the meaning."""
+        forward = quote_similarity("your glue is curing", CHUNK)
+        backward = quote_similarity("curing is glue your", CHUNK)
+        assert forward > backward
 
 
 class TestVocabularyEnforcement:
